@@ -1,0 +1,11 @@
+# Core
+dash>=2.14
+plotly>=5.18
+pandas>=2.1
+numpy>=1.24
+pyarrow>=14.0
+pyyaml>=6.0
+scipy>=1.11
+
+# Bloomberg (install separately – requires C++ SDK)
+# blpapi>=3.19

@@ -1,0 +1,84 @@
+/* ================================================================
+   Dark-theme overrides for Dash / Plotly components
+   ================================================================ */
+
+/* Global resets */
+body {
+    margin: 0;
+    background-color: #0d1117;
+    color: #e6edf3;
+    font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #161b22;
+}
+::-webkit-scrollbar-thumb {
+    background: #30363d;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
+}
+
+/* ── Dash Dropdown (dark) ── */
+.dash-dropdown-dark .Select-control {
+    background-color: #161b22 !important;
+    border: 1px solid #30363d !important;
+    color: #e6edf3 !important;
+    border-radius: 6px !important;
+}
+.dash-dropdown-dark .Select-menu-outer {
+    background-color: #161b22 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 6px !important;
+}
+.dash-dropdown-dark .VirtualizedSelectOption {
+    background-color: #161b22 !important;
+    color: #e6edf3 !important;
+}
+.dash-dropdown-dark .VirtualizedSelectFocusedOption {
+    background-color: #21262d !important;
+}
+.dash-dropdown-dark .Select-value-label {
+    color: #e6edf3 !important;
+}
+.dash-dropdown-dark .Select-placeholder {
+    color: #8b949e !important;
+}
+.dash-dropdown-dark .Select-input > input {
+    color: #e6edf3 !important;
+}
+.dash-dropdown-dark .Select-arrow {
+    border-color: #8b949e transparent transparent !important;
+}
+.dash-dropdown-dark .Select--single > .Select-control .Select-value {
+    color: #e6edf3 !important;
+}
+
+/* ── Table hover ── */
+table tbody tr:hover {
+    background-color: #21262d;
+}
+
+/* ── Loading spinner ── */
+._dash-loading-callback {
+    background-color: rgba(13, 17, 23, 0.7) !important;
+}
+
+/* ── Plotly modebar hide on charts ── */
+.modebar {
+    display: none !important;
+}
+
+/* ── Responsive tweaks ── */
+@media (max-width: 1200px) {
+    .dash-dropdown-dark .Select-control {
+        min-width: 200px;
+    }
+}

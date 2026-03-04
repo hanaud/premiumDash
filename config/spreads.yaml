@@ -1,0 +1,282 @@
+# =============================================================================
+# Commodity Premium / Discount Dashboard – Spread Configuration
+# =============================================================================
+# Edit this file to add, remove, or modify monitored spreads.
+# Each spread is computed as:  leg1 - leg2  (optionally scaled by `multiplier`)
+#
+# Bloomberg fields used:
+#   PX_LAST          – settlement / last price
+#   FUT_CUR_GEN_TICKER – current generic front-month ticker
+#   LAST_TRADEABLE_DT  – expiry date (for roll handling)
+#   FUT_ROLL_DT        – exchange roll date
+# =============================================================================
+
+settings:
+  # Bloomberg connection
+  bloomberg:
+    host: localhost
+    port: 8194
+    timeout: 30000          # ms
+
+  # Data storage
+  cache:
+    directory: data          # relative to project root
+    format: parquet
+    # Only fetch data newer than the latest cached date
+    incremental: true
+
+  # Rolling contract handling
+  rolling:
+    # How many days before expiry to roll to next contract
+    roll_days_before_expiry: 5
+    # Method: "volume" (roll on volume crossover), "calendar" (fixed days before expiry)
+    roll_method: calendar
+    # For return calculations, adjust for roll gap
+    roll_adjustment: ratio   # "ratio" or "difference"
+
+  # Snapshot / time-alignment
+  # When comparing prices across exchanges in different time zones,
+  # we must align to a common snapshot time to avoid stale-vs-fresh bias.
+  snapshots:
+    lme_official:
+      field: PX_LAST            # LME official settlement (set ~12:30 UTC)
+      utc_hour: 12
+    lme_closing:
+      field: PX_LAST            # LME closing (kerb) ~17:00 UTC
+      utc_hour: 17
+    comex_settle:
+      field: PX_LAST            # COMEX settlement (~19:00 UTC)
+      utc_hour: 19
+    shfe_close:
+      field: PX_LAST            # SHFE close (~07:00 UTC)
+      utc_hour: 7
+    lbma_pm_fix:
+      field: PX_LAST            # LBMA PM gold fix (~14:30 UTC)
+      utc_hour: 14
+    london_spot:
+      field: PX_LAST            # London spot (continuous, use ~16:00 UTC)
+      utc_hour: 16
+
+  # Demo mode – when Bloomberg is unavailable, generate synthetic data
+  demo:
+    enabled: true              # set false when connected to BBG
+    history_years: 3           # years of synthetic history to generate
+
+  # Dashboard
+  dashboard:
+    host: 127.0.0.1
+    port: 8050
+    refresh_minutes: 15
+    default_lookback_days: 365
+    theme: dark
+
+
+# =============================================================================
+#  SPREAD DEFINITIONS
+# =============================================================================
+# Fields per spread:
+#   category     – grouping in the dashboard
+#   name         – display name
+#   description  – tooltip / subtitle
+#   leg1 / leg2  – Bloomberg ticker for each leg
+#   multiplier   – applied to leg1 before subtraction (default 1.0)
+#   unit         – display unit ($/mt, $/oz, ratio, %, bps)
+#   invert       – if true, compute leg2 - leg1 instead (default false)
+#   computation  – "difference" (default) or "ratio"
+#   fx_divisor   – Bloomberg FX ticker to divide leg1 by (for currency conversion)
+#   snapshot     – snapshot label for time alignment (see settings.snapshots)
+#   leg1_snapshot / leg2_snapshot – per-leg snapshot for cross-exchange spreads
+#   enabled      – set false to hide without deleting
+# =============================================================================
+
+spreads:
+
+  # ---------------------------------------------------------------------------
+  #  BASE METALS – Inter-Exchange Arbitrage (Premium / Discount)
+  # ---------------------------------------------------------------------------
+
+  - id: cu_comex_lme
+    category: Base Metals – Inter-Exchange Arb
+    name: Copper COMEX–LME
+    description: >
+      COMEX copper (HG1, ¢/lb) vs LME copper ($/mt).
+      Multiplier converts COMEX to $/mt: 1 ¢/lb × 22.0462 = $/mt.
+      Aligned to LME official close / COMEX settlement on the same date.
+    leg1: HG1 Comdty           # COMEX generic 1st month (¢/lb)
+    leg2: LMCADY03 Comdty      # LME 3-month ($/mt)
+    leg1_snapshot: comex_settle
+    leg2_snapshot: lme_official
+    multiplier: 22.0462         # convert ¢/lb → $/mt
+    unit: $/mt
+    leg1_contracts: [HG2 Comdty, HG3 Comdty]
+    enabled: true
+
+  - id: cu_shfe_lme
+    category: Base Metals – Inter-Exchange Arb
+    name: Copper SHFE–LME
+    description: >
+      SHFE copper (CNY/mt) vs LME copper ($/mt).
+      Leg1 is SHFE copper ÷ USDCNY to convert to $/mt.
+      Aligned: SHFE close vs LME official (same business day).
+    leg1: SHFCCOM1 Index        # SHFE copper generic 1st month (CNY/mt)
+    leg2: LMCADY03 Comdty       # LME 3M ($/mt)
+    leg1_snapshot: shfe_close
+    leg2_snapshot: lme_official
+    fx_divisor: USDCNY Curncy   # divide leg1 by this to get $/mt
+    unit: $/mt
+    leg1_contracts: [SHFCCOM2 Index, SHFCCOM3 Index]
+    enabled: true
+
+  - id: al_shfe_lme
+    category: Base Metals – Inter-Exchange Arb
+    name: Aluminium SHFE–LME
+    description: SHFE aluminium (CNY/mt) vs LME aluminium ($/mt)
+    leg1: SHFACOM1 Index
+    leg2: LMAHDY03 Comdty
+    leg1_snapshot: shfe_close
+    leg2_snapshot: lme_official
+    fx_divisor: USDCNY Curncy
+    unit: $/mt
+    enabled: true
+
+  - id: zn_shfe_lme
+    category: Base Metals – Inter-Exchange Arb
+    name: Zinc SHFE–LME
+    description: SHFE zinc (CNY/mt) vs LME zinc ($/mt)
+    leg1: SHFZCOM1 Index
+    leg2: LMZSDY03 Comdty
+    leg1_snapshot: shfe_close
+    leg2_snapshot: lme_official
+    fx_divisor: USDCNY Curncy
+    unit: $/mt
+    enabled: true
+
+  - id: ni_shfe_lme
+    category: Base Metals – Inter-Exchange Arb
+    name: Nickel SHFE–LME
+    description: SHFE nickel (CNY/mt) vs LME nickel ($/mt)
+    leg1: SHFNICOM1 Index
+    leg2: LMNIDY03 Comdty
+    leg1_snapshot: shfe_close
+    leg2_snapshot: lme_official
+    fx_divisor: USDCNY Curncy
+    unit: $/mt
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  #  BASE METALS – Regional Physical Premiums
+  # ---------------------------------------------------------------------------
+
+  - id: al_midwest_premium
+    category: Base Metals – Physical Premiums
+    name: US Midwest Aluminium Premium
+    description: Platts MW aluminium premium (duty-paid, ¢/lb)
+    leg1: MWAP Index
+    leg2: null
+    unit: ¢/lb
+    enabled: true
+
+  - id: al_eu_premium
+    category: Base Metals – Physical Premiums
+    name: European Aluminium Premium
+    description: CIF Rotterdam duty-unpaid aluminium premium
+    leg1: EUAP Index
+    leg2: null
+    unit: $/mt
+    enabled: true
+
+  - id: cu_cathode_premium_cn
+    category: Base Metals – Physical Premiums
+    name: China Copper Cathode Premium
+    description: Shanghai bonded-warehouse copper premium
+    leg1: CUPPSHBI Index
+    leg2: null
+    unit: $/mt
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  #  PRECIOUS METALS – Exchange for Physical (EFP / Basis)
+  # ---------------------------------------------------------------------------
+  # EFP = COMEX futures − London spot.  A wide EFP signals physical tightness
+  # on one venue vs the other.
+
+  - id: gc_efp
+    category: Precious Metals – EFP / Basis
+    name: Gold EFP (COMEX–London)
+    description: COMEX gold front month minus LBMA PM fix (same-day alignment)
+    leg1: GC1 Comdty
+    leg2: XAU Curncy
+    leg1_snapshot: comex_settle
+    leg2_snapshot: lbma_pm_fix
+    unit: $/oz
+    leg1_contracts: [GC2 Comdty, GC3 Comdty]
+    enabled: true
+
+  - id: si_efp
+    category: Precious Metals – EFP / Basis
+    name: Silver EFP (COMEX–London)
+    description: COMEX silver front month minus London spot (same-day alignment)
+    leg1: SI1 Comdty
+    leg2: XAG Curncy
+    leg1_snapshot: comex_settle
+    leg2_snapshot: london_spot
+    unit: $/oz
+    leg1_contracts: [SI2 Comdty, SI3 Comdty]
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  #  PRECIOUS METALS – Cross-Metal Ratios
+  # ---------------------------------------------------------------------------
+
+  - id: gold_silver_ratio
+    category: Precious Metals – Cross-Metal Ratios
+    name: Gold / Silver Ratio
+    description: Ounces of silver per ounce of gold (XAU / XAG)
+    leg1: XAU Curncy
+    leg2: XAG Curncy
+    computation: ratio
+    unit: ratio
+    enabled: true
+
+  - id: platinum_gold_spread
+    category: Precious Metals – Cross-Metal Ratios
+    name: Platinum – Gold Spread
+    description: Platinum minus gold spot price (historically Pt traded at a premium)
+    leg1: XPT Curncy
+    leg2: XAU Curncy
+    unit: $/oz
+    enabled: true
+
+  - id: palladium_platinum_spread
+    category: Precious Metals – Cross-Metal Ratios
+    name: Palladium – Platinum Spread
+    description: Palladium minus platinum spot price
+    leg1: XPD Curncy
+    leg2: XPT Curncy
+    unit: $/oz
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  #  PRECIOUS METALS – Implied Lease / Forward Rates
+  # ---------------------------------------------------------------------------
+
+  - id: gold_lease_1m
+    category: Precious Metals – Lease Rates
+    name: Gold 1M Implied Lease Rate
+    description: >
+      Approximated as: SOFR − (GC2 / XAU − 1) × 12 annualised.
+    leg1: SOFRRATE Index
+    leg2: null
+    synthetic: gold_lease_1m
+    unit: "%"
+    enabled: true
+
+  - id: silver_lease_1m
+    category: Precious Metals – Lease Rates
+    name: Silver 1M Implied Lease Rate
+    description: Implied 1-month silver lease rate from futures basis
+    leg1: SOFRRATE Index
+    leg2: null
+    synthetic: silver_lease_1m
+    unit: "%"
+    enabled: true
