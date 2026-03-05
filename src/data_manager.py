@@ -62,15 +62,21 @@ class DataManager:
 
             if cached is not None and not force_refresh:
                 cached_frames[ticker] = cached
-                last_cached = cached.index.max().date()
-                # Need data after the last cached date?
-                next_day = last_cached + dt.timedelta(days=1)
-                if next_day <= end:
-                    to_fetch[ticker] = (next_day, end)
-                # Need data before the first cached date?
-                first_cached = cached.index.min().date()
-                if start < first_cached:
-                    to_fetch[ticker] = (start, first_cached - dt.timedelta(days=1))
+                # Check if all requested fields are present in cache
+                missing_fields = [f for f in fields if f not in cached.columns]
+                if missing_fields:
+                    # Need to re-fetch full range for the missing fields
+                    to_fetch[ticker] = (start, end)
+                else:
+                    last_cached = cached.index.max().date()
+                    # Need data after the last cached date?
+                    next_day = last_cached + dt.timedelta(days=1)
+                    if next_day <= end:
+                        to_fetch[ticker] = (next_day, end)
+                    # Need data before the first cached date?
+                    first_cached = cached.index.min().date()
+                    if start < first_cached:
+                        to_fetch[ticker] = (start, first_cached - dt.timedelta(days=1))
             else:
                 to_fetch[ticker] = (start, end)
 

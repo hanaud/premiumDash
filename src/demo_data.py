@@ -112,6 +112,7 @@ def generate_demo_data(
     start: dt.date,
     end: dt.date,
     seed: int = 42,
+    fields: list[str] | None = None,
 ) -> pd.DataFrame:
     """
     Generate synthetic daily price data for all requested tickers.
@@ -121,6 +122,8 @@ def generate_demo_data(
     exhibit realistic behaviour (mean-reverting, correlated legs,
     occasional regime breaks).
     """
+    if fields is None:
+        fields = ["PX_LAST"]
     rng = np.random.default_rng(seed)
     dates = pd.bdate_range(start, end)
     n = len(dates)
@@ -168,19 +171,19 @@ def generate_demo_data(
             prices = np.clip(prices, 0.01, 10.0)
 
         frames[ticker] = pd.DataFrame(
-            {"PX_LAST": prices}, index=dates
+            {f: prices for f in fields}, index=dates
         )
 
     # ── Post-process carry pairs ──
     # Overwrite back-month tickers to be front-month + small carry
     for carry_ticker, cp in CARRY_PAIRS.items():
         if carry_ticker in tickers and cp["base_ticker"] in frames:
-            base_prices = frames[cp["base_ticker"]]["PX_LAST"].values
+            base_prices = frames[cp["base_ticker"]][fields[0]].values
             carry_frac = cp["carry_bps"] / 10_000
             noise = rng.normal(0, cp["noise_vol"], n)
             derived = base_prices * (1 + carry_frac) + noise
             frames[carry_ticker] = pd.DataFrame(
-                {"PX_LAST": derived}, index=dates
+                {f: derived for f in fields}, index=dates
             )
 
     combined = pd.concat(frames, axis=1)

@@ -91,7 +91,7 @@ class BloombergClient:
 
         if not _HAS_BLPAPI or self._session is None:
             from .demo_data import generate_demo_data
-            return generate_demo_data(tickers, start, end)
+            return generate_demo_data(tickers, start, end, fields=fields)
 
         return self._bdh(tickers, fields, start, end, currency)
 

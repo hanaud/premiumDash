@@ -34,29 +34,6 @@ settings:
     # For return calculations, adjust for roll gap
     roll_adjustment: ratio   # "ratio" or "difference"
 
-  # Snapshot / time-alignment
-  # When comparing prices across exchanges in different time zones,
-  # we must align to a common snapshot time to avoid stale-vs-fresh bias.
-  snapshots:
-    lme_official:
-      field: PX_LAST            # LME official settlement (set ~12:30 UTC)
-      utc_hour: 12
-    lme_closing:
-      field: PX_LAST            # LME closing (kerb) ~17:00 UTC
-      utc_hour: 17
-    comex_settle:
-      field: PX_LAST            # COMEX settlement (~19:00 UTC)
-      utc_hour: 19
-    shfe_close:
-      field: PX_LAST            # SHFE close (~07:00 UTC)
-      utc_hour: 7
-    lbma_pm_fix:
-      field: PX_LAST            # LBMA PM gold fix (~14:30 UTC)
-      utc_hour: 14
-    london_spot:
-      field: PX_LAST            # London spot (continuous, use ~16:00 UTC)
-      utc_hour: 16
-
   # Demo mode – when Bloomberg is unavailable, generate synthetic data
   demo:
     enabled: true              # set false when connected to BBG
@@ -84,8 +61,9 @@ settings:
 #   invert       – if true, compute leg2 - leg1 instead (default false)
 #   computation  – "difference" (default) or "ratio"
 #   fx_divisor   – Bloomberg FX ticker to divide leg1 by (for currency conversion)
-#   snapshot     – snapshot label for time alignment (see settings.snapshots)
-#   leg1_snapshot / leg2_snapshot – per-leg snapshot for cross-exchange spreads
+#   field        – Bloomberg field for BOTH legs (e.g. PX837). Default PX_LAST.
+#                  Cross-exchange spreads MUST use a common snapshot field so
+#                  both legs are priced at the same moment in time.
 #   enabled      – set false to hide without deleting
 # =============================================================================
 
@@ -104,8 +82,7 @@ spreads:
       Aligned to LME official close / COMEX settlement on the same date.
     leg1: HG1 Comdty           # COMEX generic 1st month (¢/lb)
     leg2: LMCADY03 Comdty      # LME 3-month ($/mt)
-    leg1_snapshot: comex_settle
-    leg2_snapshot: lme_official
+    field: PX_LAST              # TODO: set to common snapshot field (e.g. PX837)
     multiplier: 22.0462         # convert ¢/lb → $/mt
     unit: $/mt
     leg1_contracts: [HG2 Comdty, HG3 Comdty]
@@ -120,8 +97,7 @@ spreads:
       Aligned: SHFE close vs LME official (same business day).
     leg1: SHFCCOM1 Index        # SHFE copper generic 1st month (CNY/mt)
     leg2: LMCADY03 Comdty       # LME 3M ($/mt)
-    leg1_snapshot: shfe_close
-    leg2_snapshot: lme_official
+    field: PX_LAST              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy   # divide leg1 by this to get $/mt
     unit: $/mt
     leg1_contracts: [SHFCCOM2 Index, SHFCCOM3 Index]
@@ -133,8 +109,7 @@ spreads:
     description: SHFE aluminium (CNY/mt) vs LME aluminium ($/mt)
     leg1: SHFACOM1 Index
     leg2: LMAHDY03 Comdty
-    leg1_snapshot: shfe_close
-    leg2_snapshot: lme_official
+    field: PX_LAST              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy
     unit: $/mt
     enabled: true
@@ -145,8 +120,7 @@ spreads:
     description: SHFE zinc (CNY/mt) vs LME zinc ($/mt)
     leg1: SHFZCOM1 Index
     leg2: LMZSDY03 Comdty
-    leg1_snapshot: shfe_close
-    leg2_snapshot: lme_official
+    field: PX_LAST              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy
     unit: $/mt
     enabled: true
@@ -157,8 +131,7 @@ spreads:
     description: SHFE nickel (CNY/mt) vs LME nickel ($/mt)
     leg1: SHFNICOM1 Index
     leg2: LMNIDY03 Comdty
-    leg1_snapshot: shfe_close
-    leg2_snapshot: lme_official
+    field: PX_LAST              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy
     unit: $/mt
     enabled: true
@@ -206,8 +179,7 @@ spreads:
     description: COMEX gold front month minus LBMA PM fix (same-day alignment)
     leg1: GC1 Comdty
     leg2: XAU Curncy
-    leg1_snapshot: comex_settle
-    leg2_snapshot: lbma_pm_fix
+    field: PX_LAST              # TODO: set to common snapshot field
     unit: $/oz
     leg1_contracts: [GC2 Comdty, GC3 Comdty]
     enabled: true
@@ -218,8 +190,7 @@ spreads:
     description: COMEX silver front month minus London spot (same-day alignment)
     leg1: SI1 Comdty
     leg2: XAG Curncy
-    leg1_snapshot: comex_settle
-    leg2_snapshot: london_spot
+    field: PX_LAST              # TODO: set to common snapshot field
     unit: $/oz
     leg1_contracts: [SI2 Comdty, SI3 Comdty]
     enabled: true

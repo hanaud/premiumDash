@@ -91,7 +91,7 @@ def kpi_card(label: str, value: float, unit: str, change: float,
 
 
 # ======================================================================
-#  Time-series chart for a spread
+#  Time-series chart for a spread (with percentile bands)
 # ======================================================================
 def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
     s = result.series
@@ -99,6 +99,31 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
     has_expiries = bool(result.expiry_results)
 
     fig = go.Figure()
+
+    # ---- Percentile bands (behind everything) ----
+    if not np.isnan(result.pct_10) and not np.isnan(result.pct_90):
+        # 10th–90th: very light band
+        fig.add_hrect(
+            y0=result.pct_10, y1=result.pct_90,
+            fillcolor="rgba(88,166,255,0.06)",
+            line_width=0,
+            layer="below",
+        )
+        # 25th–75th: slightly darker band
+        if not np.isnan(result.pct_25) and not np.isnan(result.pct_75):
+            fig.add_hrect(
+                y0=result.pct_25, y1=result.pct_75,
+                fillcolor="rgba(88,166,255,0.10)",
+                line_width=0,
+                layer="below",
+            )
+        # Median line
+        if not np.isnan(result.pct_50):
+            fig.add_hline(
+                y=result.pct_50,
+                line_dash="dash", line_color=T.ACCENT_BLUE, line_width=0.8,
+                opacity=0.4,
+            )
 
     # Colour the area green/red only when no multi-expiry overlay
     if sd.computation != "ratio" and sd.unit != "%" and not has_expiries:
@@ -135,11 +160,6 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
             name=exp.label,
             hovertemplate=f"%{{y:.2f}} {sd.unit}<extra></extra>",
         ))
-
-    # Mean + ±1σ bands
-    fig.add_hline(y=result.mean_1y, line_dash="dot", line_color=T.TEXT_MUTED, opacity=0.5)
-    fig.add_hline(y=result.mean_1y + result.std_1y, line_dash="dash", line_color=T.TEXT_MUTED, opacity=0.3)
-    fig.add_hline(y=result.mean_1y - result.std_1y, line_dash="dash", line_color=T.TEXT_MUTED, opacity=0.3)
 
     # Zero line for difference spreads
     if sd.computation != "ratio":
@@ -226,20 +246,44 @@ def zscore_heatmap(results: list[SpreadResult], height: int = 400) -> dcc.Graph:
 
 
 # ======================================================================
+#  Percentile background shade for table cells
+# ======================================================================
+def _pctile_bg(pctile: float) -> str:
+    """Return a subtle RGBA background colour: intense near 0/100, transparent near 50."""
+    if np.isnan(pctile):
+        return "transparent"
+    # Distance from 50 (centre), normalised 0→1
+    dist = abs(pctile - 50) / 50
+    if pctile < 50:
+        # Green tones for low percentiles
+        alpha = dist * 0.25
+        return f"rgba(63,185,80,{alpha:.2f})"
+    else:
+        # Red tones for high percentiles
+        alpha = dist * 0.25
+        return f"rgba(248,81,73,{alpha:.2f})"
+
+
+# ======================================================================
 #  Summary table
 # ======================================================================
 def summary_table(results: list[SpreadResult]) -> html.Table:
     header = html.Thead(html.Tr([
         html.Th("Spread", style=_th()),
-        html.Th("Current", style=_th()),
+        html.Th("Field", style=_th()),
+        html.Th("Leg1", style=_th()),
+        html.Th("Leg2", style=_th()),
+        html.Th("Spread", style=_th()),
         html.Th("Unit", style=_th()),
         html.Th("1D Chg", style=_th()),
         html.Th("1W Chg", style=_th()),
         html.Th("1M Chg", style=_th()),
-        html.Th("1Y Mean", style=_th()),
-        html.Th("1Y Std", style=_th()),
-        html.Th("Z-Score", style=_th()),
-        html.Th("Pctile", style=_th()),
+        html.Th("Z(1W)", style=_th()),
+        html.Th("Z(1M)", style=_th()),
+        html.Th("Z(1Y)", style=_th()),
+        html.Th("Pct(1W)", style=_th()),
+        html.Th("Pct(1M)", style=_th()),
+        html.Th("Pct(1Y)", style=_th()),
         html.Th("1Y Min", style=_th()),
         html.Th("1Y Max", style=_th()),
     ]))
@@ -255,39 +299,63 @@ def summary_table(results: list[SpreadResult]) -> html.Table:
             color = T.ACCENT_GREEN if v > 0 else (T.ACCENT_RED if v < 0 else T.TEXT_SECONDARY)
             return html.Td(_fmt(v, f), style={**_td(), "color": color})
 
-        z_color = T.ACCENT_GREEN if r.z_score_1y < -1 else (T.ACCENT_RED if r.z_score_1y > 1 else T.TEXT_PRIMARY)
+        def _z_cell(z):
+            if np.isnan(z):
+                return html.Td("—", style=_td())
+            color = T.ACCENT_GREEN if z < -1 else (T.ACCENT_RED if z > 1 else T.TEXT_PRIMARY)
+            return html.Td(_fmt(z), style={**_td(), "color": color, "fontWeight": "600"})
+
+        def _pct_cell(p):
+            if np.isnan(p):
+                return html.Td("—", style=_td())
+            return html.Td(
+                f"{p:.0f}",
+                style={**_td(), "backgroundColor": _pctile_bg(p)},
+            )
+
+        # Leg values (converted)
+        leg1_val = r.leg1_series.iloc[-1] if r.leg1_series is not None and len(r.leg1_series) > 0 else np.nan
+        leg2_val = r.leg2_series.iloc[-1] if r.leg2_series is not None and len(r.leg2_series) > 0 else np.nan
 
         rows.append(html.Tr([
-            html.Td(r.definition.name, style={**_td(), "fontWeight": "500", "whiteSpace": "nowrap"}),
+            html.Td(r.definition.name, style={**_td(), "fontWeight": "500", "whiteSpace": "nowrap", "textAlign": "left"}),
+            html.Td(r.definition.bbg_field, style={**_td(), "color": T.TEXT_MUTED, "fontSize": "10px"}),
+            html.Td(_fmt(leg1_val), style={**_td(), "color": T.TEXT_SECONDARY}),
+            html.Td(_fmt(leg2_val), style={**_td(), "color": T.TEXT_SECONDARY}),
             html.Td(_fmt(r.current_value), style={**_td(), "fontWeight": "600"}),
             html.Td(r.definition.unit, style={**_td(), "color": T.TEXT_MUTED}),
             _chg_cell(r.change_1d),
             _chg_cell(r.change_1w),
             _chg_cell(r.change_1m),
-            html.Td(_fmt(r.mean_1y), style=_td()),
-            html.Td(_fmt(r.std_1y), style=_td()),
-            html.Td(_fmt(r.z_score_1y), style={**_td(), "color": z_color, "fontWeight": "600"}),
-            html.Td(f"{r.percentile_1y:.0f}", style=_td()),
+            _z_cell(r.z_score_1w),
+            _z_cell(r.z_score_1m),
+            _z_cell(r.z_score_1y),
+            _pct_cell(r.percentile_1w),
+            _pct_cell(r.percentile_1m),
+            _pct_cell(r.percentile_1y),
             html.Td(_fmt(r.min_1y), style=_td()),
             html.Td(_fmt(r.max_1y), style=_td()),
         ]))
 
         # Sub-rows for back-month expiries
         for exp in r.expiry_results:
-            exp_chg_color = T.ACCENT_GREEN if exp.change_1d > 0 else (T.ACCENT_RED if exp.change_1d < 0 else T.TEXT_SECONDARY) if not np.isnan(exp.change_1d) else T.TEXT_MUTED
+            exp_chg_color = (
+                T.ACCENT_GREEN if exp.change_1d > 0
+                else (T.ACCENT_RED if exp.change_1d < 0 else T.TEXT_SECONDARY)
+            ) if not np.isnan(exp.change_1d) else T.TEXT_MUTED
+            exp_leg1 = exp.leg1_series.iloc[-1] if exp.leg1_series is not None and len(exp.leg1_series) > 0 else np.nan
             rows.append(html.Tr([
-                html.Td(f"  {exp.label}", style={**_td(), "color": T.TEXT_SECONDARY, "fontStyle": "italic", "paddingLeft": "24px"}),
+                html.Td(f"  {exp.label}", style={**_td(), "color": T.TEXT_SECONDARY, "fontStyle": "italic", "paddingLeft": "24px", "textAlign": "left"}),
+                html.Td("", style=_td()),  # field (same as parent)
+                html.Td(_fmt(exp_leg1), style={**_td(), "color": T.TEXT_MUTED}),
+                html.Td("", style=_td()),  # leg2 (same as parent)
                 html.Td(_fmt(exp.current_value), style={**_td(), "color": T.TEXT_SECONDARY}),
                 html.Td("", style=_td()),
-                html.Td(_fmt(exp.change_1d) if not np.isnan(exp.change_1d) else "—", style={**_td(), "color": exp_chg_color}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
-                html.Td("—", style={**_td(), "color": T.TEXT_MUTED}),
+                html.Td(
+                    _fmt(exp.change_1d) if not np.isnan(exp.change_1d) else "—",
+                    style={**_td(), "color": exp_chg_color},
+                ),
+                *[html.Td("—", style={**_td(), "color": T.TEXT_MUTED}) for _ in range(10)],
             ]))
 
     return html.Table(

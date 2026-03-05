@@ -73,12 +73,23 @@ def _refresh_cache(force: bool = False):
     dm = DataManager(cache_dir, client)
     engine = SpreadEngine(config_path, dm)
 
-    tickers = engine.all_tickers()
     end = dt.date.today()
     start = end - dt.timedelta(days=365 * 5)
 
-    logger.info("Refreshing cache for %d tickers (%s → %s)", len(tickers), start, end)
-    dm.get_history(tickers, start, end, force_refresh=force)
+    # Group tickers by Bloomberg field to minimise API calls
+    tfm = engine.ticker_field_map()
+    field_to_tickers: dict[str, list[str]] = {}
+    for ticker, fields_needed in tfm.items():
+        for f in fields_needed:
+            field_to_tickers.setdefault(f, []).append(ticker)
+
+    for bbg_field, field_tickers in field_to_tickers.items():
+        logger.info(
+            "Refreshing cache for %d tickers, field=%s (%s → %s)",
+            len(field_tickers), bbg_field, start, end,
+        )
+        dm.get_history(field_tickers, start, end, fields=[bbg_field], force_refresh=force)
+
     logger.info("Cache refresh complete. Files in: %s", cache_dir)
 
 
