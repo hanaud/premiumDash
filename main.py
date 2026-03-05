@@ -29,10 +29,31 @@ logging.basicConfig(
 logger = logging.getLogger("premiumDash")
 
 
+def _load_dashboard_defaults() -> dict:
+    """Read host/port defaults from config/spreads.yaml if available."""
+    import yaml
+
+    config_path = PROJECT_ROOT / "config" / "spreads.yaml"
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        dash_cfg = cfg.get("settings", {}).get("dashboard", {})
+        return {
+            "host": dash_cfg.get("host", "127.0.0.1"),
+            "port": dash_cfg.get("port", 8050),
+        }
+    except Exception:
+        return {"host": "127.0.0.1", "port": 8050}
+
+
 def main():
+    defaults = _load_dashboard_defaults()
+
     parser = argparse.ArgumentParser(description="Commodity Premium/Discount Dashboard")
-    parser.add_argument("--port", type=int, default=8050, help="Dashboard port (default 8050)")
-    parser.add_argument("--host", default="127.0.0.1", help="Dashboard host (default 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=defaults["port"],
+                        help=f"Dashboard port (default {defaults['port']})")
+    parser.add_argument("--host", default=defaults["host"],
+                        help=f"Dashboard host (default {defaults['host']})")
     parser.add_argument("--debug", action="store_true", help="Enable Dash debug mode")
     parser.add_argument("--refresh-only", action="store_true", help="Refresh data cache and exit")
     parser.add_argument("--force-refresh", action="store_true", help="Ignore cache, refetch everything")

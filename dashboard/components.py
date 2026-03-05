@@ -101,22 +101,32 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
     fig = go.Figure()
 
     # ---- Percentile bands (behind everything) ----
+    has_bands = False
     if not np.isnan(result.pct_10) and not np.isnan(result.pct_90):
-        # 10th–90th: very light band
-        fig.add_hrect(
-            y0=result.pct_10, y1=result.pct_90,
-            fillcolor="rgba(88,166,255,0.06)",
-            line_width=0,
-            layer="below",
-        )
-        # 25th–75th: slightly darker band
+        has_bands = True
+        x_range = [s.index.min(), s.index.max()]
+        band_10_90 = "rgba(88,166,255,0.06)"
+        band_25_75 = "rgba(88,166,255,0.12)"
+
+        # 10th–90th band as filled area (supports legend)
+        fig.add_trace(go.Scatter(
+            x=x_range + x_range[::-1],
+            y=[result.pct_90, result.pct_90, result.pct_10, result.pct_10],
+            fill="toself", fillcolor=band_10_90,
+            line=dict(width=0), mode="lines",
+            name=f"P10–P90 ({result.pct_10:.1f}–{result.pct_90:.1f})",
+            hoverinfo="skip", legendgroup="bands",
+        ))
+        # 25th–75th band
         if not np.isnan(result.pct_25) and not np.isnan(result.pct_75):
-            fig.add_hrect(
-                y0=result.pct_25, y1=result.pct_75,
-                fillcolor="rgba(88,166,255,0.10)",
-                line_width=0,
-                layer="below",
-            )
+            fig.add_trace(go.Scatter(
+                x=x_range + x_range[::-1],
+                y=[result.pct_75, result.pct_75, result.pct_25, result.pct_25],
+                fill="toself", fillcolor=band_25_75,
+                line=dict(width=0), mode="lines",
+                name=f"P25–P75 ({result.pct_25:.1f}–{result.pct_75:.1f})",
+                hoverinfo="skip", legendgroup="bands",
+            ))
         # Median line
         if not np.isnan(result.pct_50):
             fig.add_hline(
@@ -124,6 +134,13 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
                 line_dash="dash", line_color=T.ACCENT_BLUE, line_width=0.8,
                 opacity=0.4,
             )
+            # Legend entry for median
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None], mode="lines",
+                line=dict(color=T.ACCENT_BLUE, width=1, dash="dash"),
+                name=f"Median ({result.pct_50:.1f})",
+                legendgroup="bands",
+            ))
 
     # Colour the area green/red only when no multi-expiry overlay
     if sd.computation != "ratio" and sd.unit != "%" and not has_expiries:
@@ -165,12 +182,17 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
     if sd.computation != "ratio":
         fig.add_hline(y=0, line_color=T.BORDER, line_width=1)
 
+    show_legend = has_expiries or has_bands
     fig.update_layout(**_base_layout(
         title=dict(text=sd.name, font=dict(size=13)),
         height=height,
         yaxis_title=sd.unit,
-        showlegend=has_expiries,
-        legend=dict(orientation="h", y=1.12, x=0) if has_expiries else dict(),
+        showlegend=show_legend,
+        legend=dict(
+            orientation="h", y=1.18, x=0,
+            font=dict(size=9, color=T.TEXT_SECONDARY),
+            tracegroupgap=0,
+        ) if show_legend else dict(),
     ))
 
     return dcc.Graph(figure=fig, config={"displayModeBar": False}, style={"width": "100%"})
@@ -264,6 +286,33 @@ def _pctile_bg(pctile: float) -> str:
         return f"rgba(248,81,73,{alpha:.2f})"
 
 
+def _z_color(z: float) -> tuple[str, str]:
+    """Return (text_color, bg_color) for a z-score value.
+
+    Gradient: deep green for very negative, deep red for very positive.
+    Background alpha scales with magnitude (0 at z=0, max at |z|≥3).
+    """
+    if np.isnan(z):
+        return T.TEXT_MUTED, "transparent"
+
+    abs_z = min(abs(z), 3.0)
+    # Background alpha: ramp from 0 → 0.30 over |z| 0→3
+    bg_alpha = abs_z / 3.0 * 0.30
+    # Text intensity: neutral for small, full colour for |z|>1
+    if abs_z < 0.5:
+        txt = T.TEXT_SECONDARY
+    elif abs_z < 1.0:
+        txt = T.ACCENT_GREEN if z < 0 else T.ACCENT_RED
+    else:
+        txt = T.ACCENT_GREEN if z < 0 else T.ACCENT_RED
+
+    if z < 0:
+        bg = f"rgba(63,185,80,{bg_alpha:.2f})"
+    else:
+        bg = f"rgba(248,81,73,{bg_alpha:.2f})"
+    return txt, bg
+
+
 # ======================================================================
 #  Summary table
 # ======================================================================
@@ -302,8 +351,11 @@ def summary_table(results: list[SpreadResult]) -> html.Table:
         def _z_cell(z):
             if np.isnan(z):
                 return html.Td("—", style=_td())
-            color = T.ACCENT_GREEN if z < -1 else (T.ACCENT_RED if z > 1 else T.TEXT_PRIMARY)
-            return html.Td(_fmt(z), style={**_td(), "color": color, "fontWeight": "600"})
+            txt, bg = _z_color(z)
+            return html.Td(
+                _fmt(z),
+                style={**_td(), "color": txt, "backgroundColor": bg, "fontWeight": "600"},
+            )
 
         def _pct_cell(p):
             if np.isnan(p):
