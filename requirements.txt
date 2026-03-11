@@ -6,6 +6,8 @@ numpy>=1.24
 pyarrow>=14.0
 pyyaml>=6.0
 scipy>=1.11
+requests>=2.31
+openpyxl>=3.1
 
 # Bloomberg (install separately – requires C++ SDK)
 # blpapi>=3.19

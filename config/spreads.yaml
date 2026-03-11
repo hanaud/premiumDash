@@ -74,11 +74,11 @@ spreads:
   # ---------------------------------------------------------------------------
 
   - id: cu_comex_lme
-    category: Base Metals – Inter-Exchange Arb
+    category: Base Metals - Inter-Exchange Arb
     name: Copper COMEX–LME
     description: >
       COMEX copper (HG1, ¢/lb) vs LME copper ($/mt).
-      Multiplier converts COMEX to $/mt: 1 ¢/lb × 22.0462 = $/mt.
+      Multiplier converts COMEX to $/mt: 1 ¢/lb x 22.0462 = $/mt.
       Aligned to LME official close / COMEX settlement on the same date.
     leg1: HG1 Comdty           # COMEX generic 1st month (¢/lb)
     leg2: LMCADY03 Comdty      # LME 3-month ($/mt)
@@ -235,7 +235,7 @@ spreads:
     category: Precious Metals – Lease Rates
     name: Gold 1M Implied Lease Rate
     description: >
-      Approximated as: SOFR − (GC2 / XAU − 1) × 12 annualised.
+      Approximated as: SOFR − (GC2 / XAU − 1) x 12 annualised.
     leg1: SOFRRATE Index
     leg2: null
     synthetic: gold_lease_1m

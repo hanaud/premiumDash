@@ -102,21 +102,31 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
 
     # ---- Percentile bands (behind everything) ----
     has_bands = False
+    band_annotations = []  # right-edge labels for band levels
     if not np.isnan(result.pct_10) and not np.isnan(result.pct_90):
         has_bands = True
         x_range = [s.index.min(), s.index.max()]
         band_10_90 = "rgba(88,166,255,0.06)"
         band_25_75 = "rgba(88,166,255,0.12)"
 
-        # 10th–90th band as filled area (supports legend)
+        # 10th–90th band
         fig.add_trace(go.Scatter(
             x=x_range + x_range[::-1],
             y=[result.pct_90, result.pct_90, result.pct_10, result.pct_10],
             fill="toself", fillcolor=band_10_90,
             line=dict(width=0), mode="lines",
-            name=f"P10–P90 ({result.pct_10:.1f}–{result.pct_90:.1f})",
-            hoverinfo="skip", legendgroup="bands",
+            name="P10–P90", showlegend=False,
+            hoverinfo="skip",
         ))
+        # Right-edge annotations for P10, P90
+        for val, label in [(result.pct_10, "P10"), (result.pct_90, "P90")]:
+            band_annotations.append(dict(
+                x=1.0, xref="paper", xanchor="left",
+                y=val, yref="y",
+                text=f" {label} {val:.0f}",
+                font=dict(size=9, color=T.TEXT_MUTED),
+                showarrow=False,
+            ))
         # 25th–75th band
         if not np.isnan(result.pct_25) and not np.isnan(result.pct_75):
             fig.add_trace(go.Scatter(
@@ -124,9 +134,17 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
                 y=[result.pct_75, result.pct_75, result.pct_25, result.pct_25],
                 fill="toself", fillcolor=band_25_75,
                 line=dict(width=0), mode="lines",
-                name=f"P25–P75 ({result.pct_25:.1f}–{result.pct_75:.1f})",
-                hoverinfo="skip", legendgroup="bands",
+                name="P25–P75", showlegend=False,
+                hoverinfo="skip",
             ))
+            for val, label in [(result.pct_25, "P25"), (result.pct_75, "P75")]:
+                band_annotations.append(dict(
+                    x=1.0, xref="paper", xanchor="left",
+                    y=val, yref="y",
+                    text=f" {label} {val:.0f}",
+                    font=dict(size=9, color=T.TEXT_MUTED),
+                    showarrow=False,
+                ))
         # Median line
         if not np.isnan(result.pct_50):
             fig.add_hline(
@@ -134,12 +152,12 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
                 line_dash="dash", line_color=T.ACCENT_BLUE, line_width=0.8,
                 opacity=0.4,
             )
-            # Legend entry for median
-            fig.add_trace(go.Scatter(
-                x=[None], y=[None], mode="lines",
-                line=dict(color=T.ACCENT_BLUE, width=1, dash="dash"),
-                name=f"Median ({result.pct_50:.1f})",
-                legendgroup="bands",
+            band_annotations.append(dict(
+                x=1.0, xref="paper", xanchor="left",
+                y=result.pct_50, yref="y",
+                text=f" Med {result.pct_50:.0f}",
+                font=dict(size=9, color=T.ACCENT_BLUE),
+                showarrow=False,
             ))
 
     # Colour the area green/red only when no multi-expiry overlay
@@ -182,17 +200,18 @@ def spread_chart(result: SpreadResult, height: int = 280) -> dcc.Graph:
     if sd.computation != "ratio":
         fig.add_hline(y=0, line_color=T.BORDER, line_width=1)
 
-    show_legend = has_expiries or has_bands
     fig.update_layout(**_base_layout(
         title=dict(text=sd.name, font=dict(size=13)),
         height=height,
         yaxis_title=sd.unit,
-        showlegend=show_legend,
+        showlegend=has_expiries,
         legend=dict(
-            orientation="h", y=1.18, x=0,
-            font=dict(size=9, color=T.TEXT_SECONDARY),
-            tracegroupgap=0,
-        ) if show_legend else dict(),
+            orientation="h", y=1.12, x=0,
+            font=dict(size=10, color=T.TEXT_SECONDARY),
+        ) if has_expiries else dict(),
+        annotations=band_annotations if has_bands else [],
+        # Extra right margin for band labels
+        margin=dict(l=50, r=70, t=40, b=40) if has_bands else dict(l=50, r=20, t=40, b=40),
     ))
 
     return dcc.Graph(figure=fig, config={"displayModeBar": False}, style={"width": "100%"})

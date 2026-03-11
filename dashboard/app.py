@@ -211,12 +211,20 @@ def create_app() -> dash.Dash:
                 style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
             ), _stamp(app._last_refresh)
 
-        # Trim series to lookback window for display
+        # Trim series to lookback window and recompute percentile bands
         cutoff = pd.Timestamp(dt.date.today() - dt.timedelta(days=int(lookback_days)))
         for r in results:
             r.series = r.series.loc[r.series.index >= cutoff]
             for exp in r.expiry_results:
                 exp.series = exp.series.loc[exp.series.index >= cutoff]
+            # Recompute percentile bands from visible window
+            vals = r.series.dropna().values
+            if len(vals) > 1:
+                r.pct_10 = float(np.nanpercentile(vals, 10))
+                r.pct_25 = float(np.nanpercentile(vals, 25))
+                r.pct_50 = float(np.nanpercentile(vals, 50))
+                r.pct_75 = float(np.nanpercentile(vals, 75))
+                r.pct_90 = float(np.nanpercentile(vals, 90))
 
         # ── Build layout sections ──
         sections: list = []
@@ -307,5 +315,6 @@ def _stamp(last: dt.datetime | None) -> str:
     return f"Last refresh: {last.strftime('%H:%M:%S')}"
 
 
-# Need pandas for cutoff trimming
+# Need pandas/numpy for cutoff trimming and percentile recalc
+import numpy as np
 import pandas as pd
