@@ -179,7 +179,7 @@ spreads:
     description: COMEX gold front month minus LBMA PM fix (same-day alignment)
     leg1: GC1 Comdty
     leg2: XAU Curncy
-    field: PX837              # TODO: set to common snapshot field
+    field: PX837
     unit: $/oz
     leg1_contracts: [GC2 Comdty, GC3 Comdty]
     enabled: true
