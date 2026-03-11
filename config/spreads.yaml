@@ -1,14 +1,14 @@
 # =============================================================================
-# Commodity Premium / Discount Dashboard – Spread Configuration
+# Commodity Premium / Discount Dashboard - Spread Configuration
 # =============================================================================
 # Edit this file to add, remove, or modify monitored spreads.
 # Each spread is computed as:  leg1 - leg2  (optionally scaled by `multiplier`)
 #
 # Bloomberg fields used:
-#   PX_LAST          – settlement / last price
-#   FUT_CUR_GEN_TICKER – current generic front-month ticker
-#   LAST_TRADEABLE_DT  – expiry date (for roll handling)
-#   FUT_ROLL_DT        – exchange roll date
+#   PX_LAST          - settlement / last price
+#   FUT_CUR_GEN_TICKER - current generic front-month ticker
+#   LAST_TRADEABLE_DT  - expiry date (for roll handling)
+#   FUT_ROLL_DT        - exchange roll date
 # =============================================================================
 
 settings:
@@ -34,7 +34,7 @@ settings:
     # For return calculations, adjust for roll gap
     roll_adjustment: ratio   # "ratio" or "difference"
 
-  # Demo mode – when Bloomberg is unavailable, generate synthetic data
+  # Demo mode - when Bloomberg is unavailable, generate synthetic data
   demo:
     enabled: true              # set false when connected to BBG
     history_years: 3           # years of synthetic history to generate
@@ -52,96 +52,96 @@ settings:
 #  SPREAD DEFINITIONS
 # =============================================================================
 # Fields per spread:
-#   category     – grouping in the dashboard
-#   name         – display name
-#   description  – tooltip / subtitle
-#   leg1 / leg2  – Bloomberg ticker for each leg
-#   multiplier   – applied to leg1 before subtraction (default 1.0)
-#   unit         – display unit ($/mt, $/oz, ratio, %, bps)
-#   invert       – if true, compute leg2 - leg1 instead (default false)
-#   computation  – "difference" (default) or "ratio"
-#   fx_divisor   – Bloomberg FX ticker to divide leg1 by (for currency conversion)
-#   field        – Bloomberg field for BOTH legs (e.g. PX837). Default PX_LAST.
+#   category     - grouping in the dashboard
+#   name         - display name
+#   description  - tooltip / subtitle
+#   leg1 / leg2  - Bloomberg ticker for each leg
+#   multiplier   - applied to leg1 before subtraction (default 1.0)
+#   unit         - display unit ($/mt, $/oz, ratio, %, bps)
+#   invert       - if true, compute leg2 - leg1 instead (default false)
+#   computation  - "difference" (default) or "ratio"
+#   fx_divisor   - Bloomberg FX ticker to divide leg1 by (for currency conversion)
+#   field        - Bloomberg field for BOTH legs (e.g. PX837). Default PX_LAST.
 #                  Cross-exchange spreads MUST use a common snapshot field so
 #                  both legs are priced at the same moment in time.
-#   enabled      – set false to hide without deleting
+#   enabled      - set false to hide without deleting
 # =============================================================================
 
 spreads:
 
   # ---------------------------------------------------------------------------
-  #  BASE METALS – Inter-Exchange Arbitrage (Premium / Discount)
+  #  BASE METALS - Inter-Exchange Arbitrage (Premium / Discount)
   # ---------------------------------------------------------------------------
 
   - id: cu_comex_lme
     category: Base Metals - Inter-Exchange Arb
-    name: Copper COMEX–LME
+    name: Copper COMEX-LME
     description: >
       COMEX copper (HG1, ¢/lb) vs LME copper ($/mt).
       Multiplier converts COMEX to $/mt: 1 ¢/lb x 22.0462 = $/mt.
       Aligned to LME official close / COMEX settlement on the same date.
     leg1: HG1 Comdty           # COMEX generic 1st month (¢/lb)
     leg2: LMCADY03 Comdty      # LME 3-month ($/mt)
-    field: PX_LAST              # TODO: set to common snapshot field (e.g. PX837)
+    field: PX837              # TODO: set to common snapshot field (e.g. PX837)
     multiplier: 22.0462         # convert ¢/lb → $/mt
     unit: $/mt
     leg1_contracts: [HG2 Comdty, HG3 Comdty]
     enabled: true
 
   - id: cu_shfe_lme
-    category: Base Metals – Inter-Exchange Arb
-    name: Copper SHFE–LME
+    category: Base Metals - Inter-Exchange Arb
+    name: Copper SHFE-LME
     description: >
       SHFE copper (CNY/mt) vs LME copper ($/mt).
       Leg1 is SHFE copper ÷ USDCNY to convert to $/mt.
       Aligned: SHFE close vs LME official (same business day).
     leg1: SHFCCOM1 Index        # SHFE copper generic 1st month (CNY/mt)
     leg2: LMCADY03 Comdty       # LME 3M ($/mt)
-    field: PX_LAST              # TODO: set to common snapshot field
+    field: PX837              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy   # divide leg1 by this to get $/mt
     unit: $/mt
     leg1_contracts: [SHFCCOM2 Index, SHFCCOM3 Index]
     enabled: true
 
   - id: al_shfe_lme
-    category: Base Metals – Inter-Exchange Arb
-    name: Aluminium SHFE–LME
+    category: Base Metals - Inter-Exchange Arb
+    name: Aluminium SHFE-LME
     description: SHFE aluminium (CNY/mt) vs LME aluminium ($/mt)
     leg1: SHFACOM1 Index
     leg2: LMAHDY03 Comdty
-    field: PX_LAST              # TODO: set to common snapshot field
+    field: PX837              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy
     unit: $/mt
     enabled: true
 
   - id: zn_shfe_lme
-    category: Base Metals – Inter-Exchange Arb
-    name: Zinc SHFE–LME
+    category: Base Metals - Inter-Exchange Arb
+    name: Zinc SHFE-LME
     description: SHFE zinc (CNY/mt) vs LME zinc ($/mt)
     leg1: SHFZCOM1 Index
     leg2: LMZSDY03 Comdty
-    field: PX_LAST              # TODO: set to common snapshot field
+    field: PX837              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy
     unit: $/mt
     enabled: true
 
   - id: ni_shfe_lme
-    category: Base Metals – Inter-Exchange Arb
-    name: Nickel SHFE–LME
+    category: Base Metals - Inter-Exchange Arb
+    name: Nickel SHFE-LME
     description: SHFE nickel (CNY/mt) vs LME nickel ($/mt)
     leg1: SHFNICOM1 Index
     leg2: LMNIDY03 Comdty
-    field: PX_LAST              # TODO: set to common snapshot field
+    field: PX837              # TODO: set to common snapshot field
     fx_divisor: USDCNY Curncy
     unit: $/mt
     enabled: true
 
   # ---------------------------------------------------------------------------
-  #  BASE METALS – Regional Physical Premiums
+  #  BASE METALS - Regional Physical Premiums
   # ---------------------------------------------------------------------------
 
   - id: al_midwest_premium
-    category: Base Metals – Physical Premiums
+    category: Base Metals - Physical Premiums
     name: US Midwest Aluminium Premium
     description: Platts MW aluminium premium (duty-paid, ¢/lb)
     leg1: MWAP Index
@@ -150,7 +150,7 @@ spreads:
     enabled: true
 
   - id: al_eu_premium
-    category: Base Metals – Physical Premiums
+    category: Base Metals - Physical Premiums
     name: European Aluminium Premium
     description: CIF Rotterdam duty-unpaid aluminium premium
     leg1: EUAP Index
@@ -159,7 +159,7 @@ spreads:
     enabled: true
 
   - id: cu_cathode_premium_cn
-    category: Base Metals – Physical Premiums
+    category: Base Metals - Physical Premiums
     name: China Copper Cathode Premium
     description: Shanghai bonded-warehouse copper premium
     leg1: CUPPSHBI Index
@@ -168,39 +168,39 @@ spreads:
     enabled: true
 
   # ---------------------------------------------------------------------------
-  #  PRECIOUS METALS – Exchange for Physical (EFP / Basis)
+  #  PRECIOUS METALS - Exchange for Physical (EFP / Basis)
   # ---------------------------------------------------------------------------
   # EFP = COMEX futures − London spot.  A wide EFP signals physical tightness
   # on one venue vs the other.
 
   - id: gc_efp
-    category: Precious Metals – EFP / Basis
-    name: Gold EFP (COMEX–London)
+    category: Precious Metals - EFP / Basis
+    name: Gold EFP (COMEX-London)
     description: COMEX gold front month minus LBMA PM fix (same-day alignment)
     leg1: GC1 Comdty
     leg2: XAU Curncy
-    field: PX_LAST              # TODO: set to common snapshot field
+    field: PX837              # TODO: set to common snapshot field
     unit: $/oz
     leg1_contracts: [GC2 Comdty, GC3 Comdty]
     enabled: true
 
   - id: si_efp
-    category: Precious Metals – EFP / Basis
-    name: Silver EFP (COMEX–London)
+    category: Precious Metals - EFP / Basis
+    name: Silver EFP (COMEX-London)
     description: COMEX silver front month minus London spot (same-day alignment)
     leg1: SI1 Comdty
     leg2: XAG Curncy
-    field: PX_LAST              # TODO: set to common snapshot field
+    field: PX837              # TODO: set to common snapshot field
     unit: $/oz
     leg1_contracts: [SI2 Comdty, SI3 Comdty]
     enabled: true
 
   # ---------------------------------------------------------------------------
-  #  PRECIOUS METALS – Cross-Metal Ratios
+  #  PRECIOUS METALS - Cross-Metal Ratios
   # ---------------------------------------------------------------------------
 
   - id: gold_silver_ratio
-    category: Precious Metals – Cross-Metal Ratios
+    category: Precious Metals - Cross-Metal Ratios
     name: Gold / Silver Ratio
     description: Ounces of silver per ounce of gold (XAU / XAG)
     leg1: XAU Curncy
@@ -210,8 +210,8 @@ spreads:
     enabled: true
 
   - id: platinum_gold_spread
-    category: Precious Metals – Cross-Metal Ratios
-    name: Platinum – Gold Spread
+    category: Precious Metals - Cross-Metal Ratios
+    name: Platinum - Gold Spread
     description: Platinum minus gold spot price (historically Pt traded at a premium)
     leg1: XPT Curncy
     leg2: XAU Curncy
@@ -219,8 +219,8 @@ spreads:
     enabled: true
 
   - id: palladium_platinum_spread
-    category: Precious Metals – Cross-Metal Ratios
-    name: Palladium – Platinum Spread
+    category: Precious Metals - Cross-Metal Ratios
+    name: Palladium - Platinum Spread
     description: Palladium minus platinum spot price
     leg1: XPD Curncy
     leg2: XPT Curncy
@@ -228,11 +228,11 @@ spreads:
     enabled: true
 
   # ---------------------------------------------------------------------------
-  #  PRECIOUS METALS – Implied Lease / Forward Rates
+  #  PRECIOUS METALS - Implied Lease / Forward Rates
   # ---------------------------------------------------------------------------
 
   - id: gold_lease_1m
-    category: Precious Metals – Lease Rates
+    category: Precious Metals - Lease Rates
     name: Gold 1M Implied Lease Rate
     description: >
       Approximated as: SOFR − (GC2 / XAU − 1) x 12 annualised.
@@ -243,7 +243,7 @@ spreads:
     enabled: true
 
   - id: silver_lease_1m
-    category: Precious Metals – Lease Rates
+    category: Precious Metals - Lease Rates
     name: Silver 1M Implied Lease Rate
     description: Implied 1-month silver lease rate from futures basis
     leg1: SOFRRATE Index
