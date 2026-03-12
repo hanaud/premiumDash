@@ -251,3 +251,39 @@ spreads:
     synthetic: silver_lease_1m
     unit: "%"
     enabled: true
+
+  # ---------------------------------------------------------------------------
+  #  GOLD PREMIUMS - Dubai Physical vs COMEX
+  # ---------------------------------------------------------------------------
+  # Dubai premium = Bloomberg Z7A/Z71 (Dubai gold) - GCA (COMEX gold converted to oz)
+  # Z7A: Dubai 99.5% purity gold (AED/gram) × 31.1035 / USDAED
+  # Z71: Alternative Dubai gold ticker
+  # GCA: COMEX gold generic 1st month (converted to comparable basis)
+
+  - id: dubai_premium
+    category: Gold Premiums
+    name: Dubai Gold Premium
+    description: >
+      Dubai physical gold (Z7A, 99.5% purity) vs COMEX benchmark (GCA).
+      Positive = Dubai premium; negative = Dubai discount.
+      Reflects physical tightness/slack in UAE precious metals market.
+    leg1: Z7A Comdty           # Dubai gold 99.5% purity (AED/gram)
+    leg2: GCA Comdty           # COMEX gold comparable basis
+    field: PX_LAST
+    fx_divisor: USDAED Curncy  # Convert Dubai AED to USD
+    multiplier: 31.1035        # grams → troy oz
+    unit: $/oz
+    enabled: true
+
+  - id: sge_premium
+    category: Gold Premiums
+    name: Shanghai (SGE) Gold Premium
+    description: >
+      Shanghai Exchange (SGE) physical gold premium/discount to COMEX benchmark.
+      Positive = premium; negative = discount.
+      Reflects physical demand-supply balance in China.
+    leg1: Z71 Comdty           # Alternative Dubai/SGE reference (if Z7A unavailable)
+    leg2: GCA Comdty           # COMEX gold
+    field: PX_LAST
+    unit: $/oz
+    enabled: false

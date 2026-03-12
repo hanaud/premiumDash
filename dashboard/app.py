@@ -29,6 +29,7 @@ import plotly.io as pio
 
 from . import theme as T
 from .components import kpi_card, spread_chart, legs_chart, zscore_heatmap, summary_table
+from .trade_analytics import build_trade_analytics_tab
 from src.bbg_client import BloombergClient
 from src.data_manager import DataManager
 from src.spread_engine import SpreadEngine, SpreadResult
@@ -117,41 +118,64 @@ def create_app() -> dash.Dash:
                 ],
             ),
 
-            # ── Controls ──
-            html.Div(
-                style={"padding": "12px 24px", "display": "flex", "gap": "16px", "flexWrap": "wrap", "alignItems": "center"},
+            # ── Tabs ──
+            dcc.Tabs(
+                id="main-tabs",
+                value="tab-monitor",
                 children=[
-                    html.Div([
-                        html.Label("Category", style={"fontSize": "11px", "color": T.TEXT_SECONDARY, "marginBottom": "4px", "display": "block"}),
-                        dcc.Dropdown(
-                            id="category-filter",
-                            options=[{"label": "All", "value": "ALL"}] + [{"label": c, "value": c} for c in categories],
-                            value="ALL",
-                            style={"width": "320px", "fontSize": "12px"},
-                            className="dash-dropdown-dark",
-                        ),
-                    ]),
-                    html.Div([
-                        html.Label("Lookback", style={"fontSize": "11px", "color": T.TEXT_SECONDARY, "marginBottom": "4px", "display": "block"}),
-                        dcc.Dropdown(
-                            id="lookback-select",
-                            options=[
-                                {"label": "3M", "value": 90},
-                                {"label": "6M", "value": 180},
-                                {"label": "1Y", "value": 365},
-                                {"label": "2Y", "value": 730},
-                                {"label": "5Y", "value": 1825},
-                            ],
-                            value=365,
-                            style={"width": "100px", "fontSize": "12px"},
-                            className="dash-dropdown-dark",
-                        ),
-                    ]),
-                ],
-            ),
+                    # Tab 1: Premium Monitor (original dashboard)
+                    dcc.Tab(
+                        label="Premium Monitor",
+                        value="tab-monitor",
+                        children=[
+                            # Controls for this tab
+                            html.Div(
+                                style={"padding": "12px 24px", "display": "flex", "gap": "16px", "flexWrap": "wrap", "alignItems": "center"},
+                                children=[
+                                    html.Div([
+                                        html.Label("Category", style={"fontSize": "11px", "color": T.TEXT_SECONDARY, "marginBottom": "4px", "display": "block"}),
+                                        dcc.Dropdown(
+                                            id="category-filter",
+                                            options=[{"label": "All", "value": "ALL"}] + [{"label": c, "value": c} for c in categories],
+                                            value="ALL",
+                                            style={"width": "320px", "fontSize": "12px"},
+                                            className="dash-dropdown-dark",
+                                        ),
+                                    ]),
+                                    html.Div([
+                                        html.Label("Lookback", style={"fontSize": "11px", "color": T.TEXT_SECONDARY, "marginBottom": "4px", "display": "block"}),
+                                        dcc.Dropdown(
+                                            id="lookback-select",
+                                            options=[
+                                                {"label": "3M", "value": 90},
+                                                {"label": "6M", "value": 180},
+                                                {"label": "1Y", "value": 365},
+                                                {"label": "2Y", "value": 730},
+                                                {"label": "5Y", "value": 1825},
+                                            ],
+                                            value=365,
+                                            style={"width": "100px", "fontSize": "12px"},
+                                            className="dash-dropdown-dark",
+                                        ),
+                                    ]),
+                                ],
+                            ),
+                            # Content
+                            html.Div(id="main-content", style={"padding": "0 24px 40px"}),
+                        ],
+                    ),
 
-            # ── Main content ──
-            html.Div(id="main-content", style={"padding": "0 24px 40px"}),
+                    # Tab 2: Dubai Trade Analytics
+                    dcc.Tab(
+                        label="Dubai Trade Analytics",
+                        value="tab-analytics",
+                        children=[
+                            html.Div(id="analytics-content"),
+                        ],
+                    ),
+                ],
+                style={"borderBottom": f"1px solid {T.BG_TERTIARY}"},
+            ),
         ],
     )
 
@@ -277,6 +301,23 @@ def create_app() -> dash.Dash:
         ))
 
         return sections, _stamp(app._last_refresh)
+
+    # Callback for analytics tab
+    @app.callback(
+        Output("analytics-content", "children"),
+        Input("main-tabs", "value"),
+    )
+    def update_analytics_tab(active_tab):
+        if active_tab != "tab-analytics":
+            return html.Div()
+        try:
+            return build_trade_analytics_tab()
+        except Exception:
+            logger.exception("Failed to build analytics tab")
+            return html.Div(
+                "Failed to load trade analytics. Check data sources.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
 
     return app
 

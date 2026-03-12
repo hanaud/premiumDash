@@ -48,6 +48,8 @@ class SpreadDef:
     bbg_field: str = "PX_LAST"      # Bloomberg field for both legs
     synthetic: Optional[str] = None
     leg1_contracts: list[str] = dc_field(default_factory=list)
+    data_source: Optional[str] = None  # "gold_trade" for manual-loaded data
+    field: Optional[str] = None  # For gold_trade: column name from gold_trade DataFrame
     extra: dict = dc_field(default_factory=dict)
 
 
@@ -135,6 +137,8 @@ class SpreadEngine:
                 bbg_field=s.get("field", "PX_LAST"),
                 synthetic=s.get("synthetic"),
                 leg1_contracts=s.get("leg1_contracts", []),
+                data_source=s.get("data_source"),
+                field=s.get("field"),  # Overloaded: gold_trade column name
             )
             self.spread_defs.append(sd)
 
@@ -193,10 +197,8 @@ class SpreadEngine:
         if start is None:
             start = end - dt.timedelta(days=lookback + 90)  # extra buffer for stats
 
-        # 1. Build field requirements & fetch
+        # 1. Build field requirements & fetch Bloomberg data
         tfm = self.ticker_field_map()
-        if not tfm:
-            return []
 
         # Group tickers by field to minimise API calls
         field_to_tickers: dict[str, list[str]] = {}
@@ -214,10 +216,6 @@ class SpreadEngine:
             )
             if not raw.empty:
                 all_raw[bbg_field] = raw
-
-        if not all_raw:
-            logger.warning("No data returned from DataManager")
-            return []
 
         # 2. Build prices dict: (ticker, field) → Series
         prices: dict[tuple[str, str], pd.Series] = {}
@@ -587,3 +585,4 @@ class SpreadEngine:
             pct_75=np.nanpercentile(trailing_1y, 75) if len(trailing_1y) > 1 else np.nan,
             pct_90=np.nanpercentile(trailing_1y, 90) if len(trailing_1y) > 1 else np.nan,
         )
+
