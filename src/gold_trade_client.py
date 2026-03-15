@@ -64,15 +64,24 @@ class GoldTradeDataClient:
         self,
         cache_dir: str | Path = DEFAULT_CACHE_DIR,
         comtrade_api_key: Optional[str] = None,
+        proxy_url: Optional[str] = None,
     ):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.comtrade_api_key = comtrade_api_key
+        self.proxy_url = proxy_url
         self._session = requests.Session()
         self._session.headers.update({
             "User-Agent": "PremiumDash/1.0 (gold-trade-research)",
             "Accept": "application/json",
         })
+        # Configure proxy if provided
+        if proxy_url:
+            self._session.proxies.update({
+                "http": proxy_url,
+                "https": proxy_url,
+            })
+            logger.info(f"GoldTradeDataClient configured with proxy: {proxy_url}")
 
     # ==================================================================
     #  1. UN Comtrade — UAE gold trade by partner (monthly)
@@ -795,7 +804,7 @@ class GoldTradeDataClient:
         Returns a dict keyed by source name.
         """
         results = {}
-c
+
         logger.info("=" * 60)
         logger.info("Fetching from all Tier 1 gold trade data sources")
         logger.info("=" * 60)

@@ -44,11 +44,11 @@ pio.templates["premium_dash"] = T.PLOTLY_TEMPLATE
 pio.templates.default = "premium_dash"
 
 
-def create_app() -> dash.Dash:
+def create_app(proxy_url: str | None = None) -> dash.Dash:
     # ------------------------------------------------------------------
     #  Bootstrap services
     # ------------------------------------------------------------------
-    engine = SpreadEngine(CONFIG_PATH, _build_data_manager())
+    engine = SpreadEngine(CONFIG_PATH, _build_data_manager(proxy_url))
 
     app = dash.Dash(
         __name__,
@@ -325,8 +325,20 @@ def create_app() -> dash.Dash:
 # ======================================================================
 #  Helpers
 # ======================================================================
-def _build_data_manager() -> DataManager:
+def _build_data_manager(proxy_url: str | None = None) -> DataManager:
     import yaml
+    import os
+
+    # Proxy from function parameter, config, or environment variable (in order of precedence)
+    if proxy_url is None:
+        proxy_url = os.environ.get("PREMIUM_DASH_PROXY")
+
+    if proxy_url is None:
+        with open(CONFIG_PATH) as f:
+            cfg = yaml.safe_load(f)
+        net_cfg = cfg.get("settings", {}).get("network", {})
+        proxy_url = net_cfg.get("proxy_url")
+
     with open(CONFIG_PATH) as f:
         cfg = yaml.safe_load(f)
     settings = cfg.get("settings", {})
@@ -337,6 +349,7 @@ def _build_data_manager() -> DataManager:
         host=bbg_cfg.get("host", "localhost"),
         port=bbg_cfg.get("port", 8194),
         timeout=bbg_cfg.get("timeout", 30000),
+        proxy_url=proxy_url,
     )
     client.connect()
     return DataManager(cache_dir, client)

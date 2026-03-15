@@ -32,18 +32,34 @@ logger = logging.getLogger("premiumDash")
 def _load_dashboard_defaults() -> dict:
     """Read host/port defaults from config/spreads.yaml if available."""
     import yaml
+    import os
 
     config_path = PROJECT_ROOT / "config" / "spreads.yaml"
+    defaults = {
+        "host": "127.0.0.1",
+        "port": 8050,
+        "proxy_url": None,
+    }
+
     try:
         with open(config_path) as f:
             cfg = yaml.safe_load(f)
         dash_cfg = cfg.get("settings", {}).get("dashboard", {})
-        return {
-            "host": dash_cfg.get("host", "127.0.0.1"),
-            "port": dash_cfg.get("port", 8050),
-        }
+        defaults["host"] = dash_cfg.get("host", "127.0.0.1")
+        defaults["port"] = dash_cfg.get("port", 8050)
+
+        # Read proxy from config (can be overridden by env var)
+        net_cfg = cfg.get("settings", {}).get("network", {})
+        defaults["proxy_url"] = net_cfg.get("proxy_url")
     except Exception:
-        return {"host": "127.0.0.1", "port": 8050}
+        pass
+
+    # Environment variable takes precedence
+    env_proxy = os.environ.get("PREMIUM_DASH_PROXY")
+    if env_proxy:
+        defaults["proxy_url"] = env_proxy
+
+    return defaults
 
 
 def main():
@@ -54,23 +70,27 @@ def main():
                         help=f"Dashboard port (default {defaults['port']})")
     parser.add_argument("--host", default=defaults["host"],
                         help=f"Dashboard host (default {defaults['host']})")
+    parser.add_argument("--proxy", default=defaults.get("proxy_url"),
+                        help="Proxy URL for all HTTP requests (e.g., http://proxy.corp.com:3128, socks5://127.0.0.1:1080)")
     parser.add_argument("--debug", action="store_true", help="Enable Dash debug mode")
     parser.add_argument("--refresh-only", action="store_true", help="Refresh data cache and exit")
     parser.add_argument("--force-refresh", action="store_true", help="Ignore cache, refetch everything")
     args = parser.parse_args()
 
     if args.refresh_only:
-        _refresh_cache(args.force_refresh)
+        _refresh_cache(args.force_refresh, args.proxy)
         return
 
     from dashboard.app import create_app
 
-    app = create_app()
+    app = create_app(proxy_url=args.proxy)
     logger.info("Starting dashboard on http://%s:%d", args.host, args.port)
+    if args.proxy:
+        logger.info("Using proxy: %s", args.proxy)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
-def _refresh_cache(force: bool = False):
+def _refresh_cache(force: bool = False, proxy_url: str | None = None):
     """Pull latest data from Bloomberg into parquet cache without starting the dashboard."""
     import yaml
     from src.bbg_client import BloombergClient
@@ -89,6 +109,7 @@ def _refresh_cache(force: bool = False):
         host=bbg_cfg.get("host", "localhost"),
         port=bbg_cfg.get("port", 8194),
         timeout=bbg_cfg.get("timeout", 30000),
+        proxy_url=proxy_url,
     )
     client.connect()
     dm = DataManager(cache_dir, client)

@@ -35,11 +35,20 @@ except ImportError:
 class BloombergClient:
     """Thin wrapper around blpapi for historical + reference data."""
 
-    def __init__(self, host: str = "localhost", port: int = 8194, timeout: int = 30_000):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 8194,
+        timeout: int = 30_000,
+        proxy_url: Optional[str] = None,
+    ):
         self.host = host
         self.port = port
         self.timeout = timeout
+        self.proxy_url = proxy_url
         self._session: Optional[object] = None
+        if proxy_url:
+            logger.info(f"BloombergClient proxy configured: {proxy_url}")
 
     # ------------------------------------------------------------------
     #  Connection

@@ -12,6 +12,17 @@
 # =============================================================================
 
 settings:
+  # Proxy configuration (optional)
+  # Used for all HTTP requests (Bloomberg, yfinance, Comtrade, etc.)
+  # Set proxy_url to use a proxy. Leave blank or remove to disable.
+  # Examples:
+  #   http://127.0.0.1:8080                          (HTTP proxy)
+  #   socks5://127.0.0.1:1080                        (SOCKS5 proxy)
+  #   http://user:password@proxy.corp.com:3128       (Authenticated proxy)
+  # Can also be set via PREMIUM_DASH_PROXY environment variable (takes precedence)
+  network:
+    proxy_url: null         # or: "http://proxy.corp.com:3128"
+
   # Bloomberg connection
   bloomberg:
     host: localhost
