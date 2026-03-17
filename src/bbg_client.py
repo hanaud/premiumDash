@@ -58,15 +58,35 @@ class BloombergClient:
             logger.info("blpapi unavailable – running in demo mode")
             return
 
-        opts = blpapi.SessionOptions()
-        opts.setServerHost(self.host)
-        opts.setServerPort(self.port)
-        self._session = blpapi.Session(opts)
-        if not self._session.start():
-            raise ConnectionError("Failed to start Bloomberg session")
-        if not self._session.openService("//blp/refdata"):
-            raise ConnectionError("Failed to open //blp/refdata")
-        logger.info("Bloomberg session connected (%s:%s)", self.host, self.port)
+        try:
+            opts = blpapi.SessionOptions()
+            opts.setServerHost(self.host)
+            opts.setServerPort(self.port)
+            self._session = blpapi.Session(opts)
+            if not self._session.start():
+                logger.warning(
+                    "Failed to start Bloomberg session (Terminal not running?). "
+                    "Running in demo mode with synthetic data."
+                )
+                self._session = None
+                return
+            if not self._session.openService("//blp/refdata"):
+                logger.warning(
+                    "Failed to open //blp/refdata service. "
+                    "Running in demo mode with synthetic data."
+                )
+                self._session.stop()
+                self._session = None
+                return
+            logger.info("Bloomberg session connected (%s:%s)", self.host, self.port)
+        except (ConnectionError, NotImplementedError, RuntimeError, Exception) as e:
+            logger.warning(
+                "Bloomberg connection failed (%s: %s). "
+                "Make sure Bloomberg Terminal is running with DAPI enabled. "
+                "Running in demo mode with synthetic data.",
+                type(e).__name__, str(e)
+            )
+            self._session = None
 
     def disconnect(self) -> None:
         if self._session is not None:
