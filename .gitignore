@@ -7,8 +7,28 @@ build/
 .venv/
 venv/
 
-# Data cache (regenerated at runtime)
-data/*.parquet
+# Data cache strategy:
+# - INCLUDE seed/sample cache files for fast bootstrap on new machines
+# - EXCLUDE Bloomberg ticker data (large, frequently updated)
+# - EXCLUDE temporary/session cache files
+
+# Allow committed cache files (seed data for initialization)
+!data/gold_trade/*.parquet
+
+# But ignore large/temporary Bloomberg ticker caches
+data/GC*.parquet
+data/SI*.parquet
+data/Z*.parquet
+data/USD*.parquet
+data/XAG*.parquet
+data/XPT*.parquet
+data/*_Comdty.parquet
+data/*_Curncy.parquet
+data/*_Index.parquet
+
+# Allow git to track the directories
+!data/
+!data/gold_trade/
 
 # IDE
 .idea/

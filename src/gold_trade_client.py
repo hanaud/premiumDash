@@ -173,7 +173,12 @@ class GoldTradeDataClient:
                 time.sleep(RATE_LIMIT_PAUSE)
 
         if not all_records:
-            logger.warning("Comtrade returned no records")
+            logger.warning("Comtrade returned no records, checking cache for fallback")
+            cached = self._load_cache(cache_key)
+            if cached is not None:
+                logger.info("Using cached Comtrade data as fallback")
+                return cached
+            logger.warning("No cached fallback available either")
             return pd.DataFrame()
 
         df = pd.DataFrame(all_records)
@@ -292,7 +297,14 @@ class GoldTradeDataClient:
             time.sleep(RATE_LIMIT_PAUSE)
 
         if not all_records:
-            logger.warning("Swiss-Impex returned no records, trying opendata.swiss fallback")
+            logger.warning("Swiss-Impex Comtrade returned no records, trying fallback strategies")
+            # Try cache first
+            cached = self._load_cache(cache_key)
+            if cached is not None:
+                logger.info("Using cached Swiss-Impex data as fallback")
+                return cached
+            # Then try opendata.swiss
+            logger.info("Trying opendata.swiss fallback")
             return self._fetch_swiss_opendata(force_refresh)
 
         df = pd.DataFrame(all_records)
@@ -383,7 +395,12 @@ class GoldTradeDataClient:
             return df
 
         except requests.RequestException as exc:
-            logger.warning("opendata.swiss request failed: %s", exc)
+            logger.warning("opendata.swiss request failed: %s, checking cache", exc)
+            cached = self._load_cache(cache_key)
+            if cached is not None:
+                logger.info("Using cached opendata.swiss data as fallback")
+                return cached
+            logger.warning("No cached fallback available")
             return pd.DataFrame()
 
     # ==================================================================
@@ -448,18 +465,28 @@ class GoldTradeDataClient:
 
         logger.warning(
             "Could not auto-download WGC premium data. "
-            "Download manually from https://www.gold.org/goldhub/data/gold-premium "
-            "and place as data/gold_trade/gold-premiums.xlsx"
+            "Checking cache first, then manual file fallback."
         )
+
+        # Check cache first
+        cached = self._load_cache(cache_key)
+        if cached is not None:
+            logger.info("Using cached WGC premium data as fallback")
+            return cached
 
         # Check for manually downloaded file
         manual_path = self.cache_dir / "gold-premiums.xlsx"
         if manual_path.exists():
-            df = pd.read_excel(manual_path)
-            df = self._parse_wgc_premium(df)
-            self._save_cache(cache_key, df)
-            return df
+            try:
+                df = pd.read_excel(manual_path)
+                df = self._parse_wgc_premium(df)
+                self._save_cache(cache_key, df)
+                logger.info("Loaded WGC premium from manually downloaded file")
+                return df
+            except Exception as exc:
+                logger.warning("Failed to read manual WGC file: %s", exc)
 
+        logger.warning("No WGC premium data available (download from https://www.gold.org/goldhub/data/gold-premium)")
         return pd.DataFrame()
 
     @staticmethod
@@ -556,6 +583,12 @@ class GoldTradeDataClient:
                 df = df.sort_values("date").reset_index(drop=True)
                 self._save_cache(cache_key, df)
                 return df
+
+        # Check cache as fallback
+        cached = self._load_cache(cache_key)
+        if cached is not None:
+            logger.info("Using cached CBUAE reserves data as fallback")
+            return cached
 
         logger.warning(
             "Could not auto-fetch CBUAE reserves. Download monthly bulletins "
@@ -760,6 +793,13 @@ class GoldTradeDataClient:
                         return df
         except Exception as exc:
             logger.debug("TrendEconomy XLSX export failed: %s", exc)
+
+        # Try the broader cache key (without specific year range)
+        general_cache_key = "trendeconomy"
+        cached_general = self._load_cache(general_cache_key)
+        if cached_general is not None:
+            logger.info("Using cached TrendEconomy data as fallback")
+            return cached_general
 
         logger.warning(
             "TrendEconomy auto-fetch failed. Visit "
