@@ -51,10 +51,31 @@ python main.py
 | `http://user:pass@proxy:3128` | Authenticated proxy |
 | `socks5://user:pass@proxy:1080` | Authenticated SOCKS5 |
 
+### Special Characters in Proxy Passwords
+
+If your proxy password contains special characters like `!`, `@`, `#`, `$`, `*`, or `%`, they should be URL-encoded. The dashboard automatically encodes special characters, but here's the mapping if you need to manually encode:
+
+| Character | Encoded | Character | Encoded |
+|-----------|---------|-----------|---------|
+| `!` | `%21` | `@` | `%40` |
+| `#` | `%23` | `$` | `%24` |
+| `%` | `%25` | `*` | `%2A` |
+| `&` | `%26` | `:` (in password) | `%3A` |
+
+**Example:**
+- Password: `p@ss!word*`
+- Encoded: `p%40ss%21word%2A`
+- Full URL: `http://user:p%40ss%21word%2A@proxy.corp.com:3128`
+
+**Note:** The dashboard automatically encodes special characters when you provide the proxy URL, so you can use raw passwords. The encoding happens internally during HTTP requests.
+
 ### Testing Proxy Connection
 ```bash
 # Test with --refresh-only to verify proxy works before starting dashboard
 python main.py --proxy "http://proxy.corp.com:3128" --refresh-only
+
+# Test with special characters in password (automatic encoding)
+python main.py --proxy "http://user:p@ss!word*@proxy.corp.com:3128" --refresh-only
 ```
 
 ---
@@ -260,15 +281,33 @@ settings:
 
 ## Troubleshooting
 
-### Proxy Connection Failed
+### Proxy Connection Failed (curl error 6)
 ```
 ERROR: RequestException: Failed to connect through proxy
+ERROR: yfinance curl error (6) – Couldn't resolve host name
 ```
+**Cause:** Usually indicates special characters in proxy password that weren't properly encoded.
+
 **Solution:**
-1. Verify proxy URL format: `protocol://host:port`
-2. Check proxy is running and accessible
-3. Test: `curl -x http://proxy:3128 https://www.google.com`
-4. Check credentials in proxy URL if authenticated
+1. Check if your proxy password contains special characters: `!`, `@`, `#`, `$`, `*`, `%`, `&`, `:`
+2. The dashboard automatically encodes these, but verify the proxy works:
+   ```bash
+   # Test proxy directly
+   curl -x http://user:password@proxy:3128 https://www.google.com
+
+   # If password has special chars, it may need manual encoding
+   # Example: p@ss!word* → p%40ss%21word%2A
+   curl -x http://user:p%40ss%21word%2A@proxy:3128 https://www.google.com
+   ```
+3. Try with the dashboard (automatic encoding):
+   ```bash
+   python main.py --proxy "http://user:your!pass@word*@proxy:3128" --refresh-only
+   ```
+4. If still failing, check:
+   - Proxy host/port are correct
+   - Proxy is accessible from your network
+   - Firewall allows outbound to proxy
+   - Username/password are correct
 
 ### Data Not Updating
 ```

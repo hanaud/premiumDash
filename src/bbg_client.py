@@ -17,6 +17,8 @@ from typing import Optional
 
 import pandas as pd
 
+from .proxy_utils import encode_proxy_url
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

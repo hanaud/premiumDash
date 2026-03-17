@@ -118,6 +118,16 @@ Proxy is used for:
 - ✅ External data fetches
 - ❌ NOT needed for Bloomberg (already handled by Terminal)
 
+**If your proxy password has special characters:**
+The dashboard automatically encodes them, so you can use raw passwords:
+```bash
+# This works – special chars are auto-encoded internally
+python main.py --proxy "http://user:p@ss!word*@proxy.internal.com:3128"
+```
+
+Common special characters in passwords that are handled:
+`!`, `@`, `#`, `$`, `*`, `%`, `&`, `:`
+
 ---
 
 ## Updating Cache Data

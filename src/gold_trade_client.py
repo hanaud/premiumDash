@@ -24,6 +24,8 @@ from typing import Optional
 import pandas as pd
 import requests
 
+from .proxy_utils import encode_proxy_url
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -77,11 +79,13 @@ class GoldTradeDataClient:
         })
         # Configure proxy if provided
         if proxy_url:
+            # Encode special characters in proxy URL (especially credentials)
+            encoded_proxy = encode_proxy_url(proxy_url)
             self._session.proxies.update({
-                "http": proxy_url,
-                "https": proxy_url,
+                "http": encoded_proxy,
+                "https": encoded_proxy,
             })
-            logger.info(f"GoldTradeDataClient configured with proxy: {proxy_url}")
+            logger.info(f"GoldTradeDataClient configured with proxy (credentials encoded)")
 
     # ==================================================================
     #  1. UN Comtrade — UAE gold trade by partner (monthly)
