@@ -66,9 +66,14 @@ def main():
     import os
 
     # Disable Jupyter notebook mode detection
-    # This prevents Dash from trying to use Jupyter's comm protocol
+    # This prevents Dash/IPython from trying to use Jupyter's comm protocol in terminal mode
     os.environ.setdefault('DASH_HOT_RELOAD', 'False')
     os.environ.setdefault('PYTHONUNBUFFERED', '1')
+
+    # Tell IPython we are NOT in a Jupyter kernel environment
+    # This prevents IPython from trying to create a kernel comm
+    os.environ['PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT'] = '2'
+    os.environ['JPY_PARENT_PID'] = '-1'
 
     defaults = _load_dashboard_defaults()
 
