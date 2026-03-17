@@ -63,6 +63,13 @@ def _load_dashboard_defaults() -> dict:
 
 
 def main():
+    import os
+
+    # Disable Jupyter notebook mode detection
+    # This prevents Dash from trying to use Jupyter's comm protocol
+    os.environ.setdefault('DASH_HOT_RELOAD', 'False')
+    os.environ.setdefault('PYTHONUNBUFFERED', '1')
+
     defaults = _load_dashboard_defaults()
 
     parser = argparse.ArgumentParser(description="Commodity Premium/Discount Dashboard")
@@ -87,6 +94,8 @@ def main():
     logger.info("Starting dashboard on http://%s:%d", args.host, args.port)
     if args.proxy:
         logger.info("Using proxy: %s", args.proxy)
+
+    # Run in standalone server mode, not Jupyter mode
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 

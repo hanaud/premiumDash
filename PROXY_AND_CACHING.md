@@ -300,6 +300,17 @@ MemoryError: Unable to allocate X GB
 2. Reduce lookback period in `config/spreads.yaml`
 3. Run `--refresh-only` instead of full dashboard
 
+### Jupyter Dash _create_comm Error
+```
+NotImplementedError in _create_comm
+```
+**Cause:** Dash detects Jupyter environment presence and tries to run in notebook mode when executed from terminal
+**Solution:** This is automatically handled in `main.py` which sets `DASH_HOT_RELOAD=False` before importing Dash. If you see this error, just update:
+```bash
+git pull origin main
+python main.py
+```
+
 ---
 
 ## Advanced: Custom Caching Strategy

@@ -150,12 +150,21 @@ python main.py --force-refresh --proxy "http://proxy:3128"
 
 ## Troubleshooting
 
-### Error: "NotImplementedError in _create_comm"
-**Cause:** Old version trying to connect to Bloomberg
-**Fix:** Update from GitHub
+### Error: "NotImplementedError in _create_comm" (Jupyter Dash)
+**Cause:** Dash auto-detects Jupyter environment and tries to use Jupyter comm protocol when running from terminal
+**Fix:** This is already handled in the code. If you see this error:
 ```bash
+# Update the code
 git pull origin main
+
+# The fix disables Jupyter mode detection by setting environment variables
+# (main.py now does this automatically before starting the server)
+
+# Try running again
+python main.py
 ```
+
+**Technical Details:** Dash 4.0.0+ detects the presence of `jupyter_core` package and attempts to initialize in Jupyter notebook mode even when running in a terminal. The fix sets `DASH_HOT_RELOAD=False` and `PYTHONUNBUFFERED=1` before Dash initialization to force standalone server mode.
 
 ### Error: "ConnectionError: Failed to start Bloomberg session"
 **Cause:** Bloomberg Terminal not running (expected)

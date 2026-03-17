@@ -57,6 +57,10 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
         suppress_callback_exceptions=True,
     )
 
+    # Explicitly run in standalone server mode, not Jupyter notebook mode
+    app.config.suppress_callback_exceptions = True
+    app.config.update({'suppress_callback_exceptions': True})
+
     # Store results in server-side cache
     app._spread_results: list[SpreadResult] = []
     app._last_refresh: dt.datetime | None = None
