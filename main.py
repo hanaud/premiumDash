@@ -14,8 +14,19 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Load .env file if present (before any imports that need env vars)
+_env_path = Path(__file__).resolve().parent / "config" / ".env"
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
 
 # Ensure project root is on the path
 PROJECT_ROOT = Path(__file__).resolve().parent

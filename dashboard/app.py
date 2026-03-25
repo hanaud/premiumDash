@@ -30,6 +30,7 @@ import plotly.io as pio
 from . import theme as T
 from .components import kpi_card, spread_chart, legs_chart, zscore_heatmap, summary_table
 from .trade_analytics import build_trade_analytics_tab
+from .seasonality import build_seasonality_tab, build_seasonality_charts
 from src.bbg_client import BloombergClient
 from src.data_manager import DataManager
 from src.spread_engine import SpreadEngine, SpreadResult
@@ -177,6 +178,15 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
                             html.Div(id="analytics-content"),
                         ],
                     ),
+
+                    # Tab 3: Trade Seasonality
+                    dcc.Tab(
+                        label="Trade Seasonality",
+                        value="tab-seasonality",
+                        children=[
+                            html.Div(id="seasonality-tab-content"),
+                        ],
+                    ),
                 ],
                 style={"borderBottom": f"1px solid {T.BG_TERTIARY}"},
             ),
@@ -320,6 +330,57 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
             logger.exception("Failed to build analytics tab")
             return html.Div(
                 "Failed to load trade analytics. Check data sources.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
+
+    # Callback for seasonality tab — render controls on tab switch
+    @app.callback(
+        Output("seasonality-tab-content", "children"),
+        Input("main-tabs", "value"),
+    )
+    def update_seasonality_tab(active_tab):
+        if active_tab != "tab-seasonality":
+            return html.Div()
+        try:
+            return build_seasonality_tab()
+        except Exception:
+            logger.exception("Failed to build seasonality tab")
+            return html.Div(
+                "Failed to load seasonality tab. Check data sources.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
+
+    # Callback for seasonality charts — update on control changes
+    @app.callback(
+        Output("seasonality-content", "children"),
+        Input("seasonality-country", "value"),
+        Input("seasonality-flow", "value"),
+        Input("seasonality-metric", "value"),
+        Input("seasonality-topn", "value"),
+        Input("seasonality-recent", "value"),
+        Input("seasonality-zscore-mode", "value"),
+        prevent_initial_call=False,
+    )
+    def update_seasonality_charts(country, flow, metric, top_n, recent_months, zscore_mode):
+        if not country:
+            return html.Div(
+                "Select a country to view seasonality data.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
+        try:
+            return build_seasonality_charts(
+                country_code=country,
+                flow_code=flow or "M",
+                metric=metric or "value_usd",
+                top_n=top_n or 15,
+                recent_months=recent_months or 6,
+                zscore_mode=zscore_mode or "row",
+            )
+        except Exception:
+            logger.exception("Failed to build seasonality charts")
+            return html.Div(
+                "Failed to load seasonality data. The data may not be cached yet — "
+                "check network connectivity or try again.",
                 style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
             )
 

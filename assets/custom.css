@@ -71,6 +71,11 @@ table tbody tr:hover {
     background-color: rgba(13, 17, 23, 0.7) !important;
 }
 
+@keyframes spin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
 /* ── Plotly modebar hide on charts ── */
 .modebar {
     display: none !important;

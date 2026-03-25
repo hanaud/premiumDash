@@ -7,8 +7,8 @@ and outputs a multi-sheet Excel workbook with daily, monthly, and annual series.
 Data sources (default mode):
   - Yahoo Finance: Gold, silver, FX rates, DXY, GLD ETF, US 10Y, VIX, crude oil
   - UN Comtrade API: UAE gold imports/exports by partner country (HS 7108)
-  - Manual/research: India duty, UAE CB reserves, SGE premium, Dubai premium,
-    ETF holdings, India imports, Swiss/Turkey/Africa flows, global CB purchases
+  - CSV files in data/ folder: India duty, UAE CB reserves, SGE premium, Dubai
+    premium, ETF holdings, India imports, Swiss/Turkey/Africa flows, CB purchases
 
 Data sources (--bloomberg mode):
   - Bloomberg Terminal (blpapi): All daily market data, LBMA fixes, DGCX gold,
@@ -16,15 +16,21 @@ Data sources (--bloomberg mode):
   - Falls back to Yahoo Finance / research estimates for any series that fail.
   - UN Comtrade is still used for partner-level trade data.
 
+Proxy support:
+  All HTTP requests (yfinance, Comtrade, etc.) can be routed through a proxy
+  using --proxy http://host:port or --proxy socks5://host:port
+
 Requirements:
   Default:    pip install yfinance pandas openpyxl requests
   Bloomberg:  pip install blpapi pandas openpyxl requests
-              (requires Bloomberg Terminal running with DAPI enabled)
+  Proxy:      pip install requests[socks]   (only for SOCKS proxies)
 
 Usage:
   python uae_gold_data_collector.py
   python uae_gold_data_collector.py --bloomberg
-  python uae_gold_data_collector.py --bloomberg --output /path/to/output.xlsx
+  python uae_gold_data_collector.py --proxy http://127.0.0.1:8080
+  python uae_gold_data_collector.py --proxy socks5://127.0.0.1:1080
+  python uae_gold_data_collector.py --data-dir /path/to/data
   python uae_gold_data_collector.py --start 2018-01-01 --end 2025-12-31
 """
 
@@ -44,6 +50,9 @@ from openpyxl.utils import get_column_letter
 yf = None
 blpapi = None
 
+# Global proxy dict — set from CLI via configure_proxy()
+_PROXY_DICT = {}
+
 
 # ============================================================
 # CONFIG
@@ -51,6 +60,21 @@ blpapi = None
 DEFAULT_START = "2016-01-01"
 DEFAULT_END = datetime.now().strftime("%Y-%m-%d")
 DEFAULT_OUTPUT = "UAE_Gold_Trade_Historical_Data.xlsx"
+DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+
+# Expected data files (filename -> description)
+DATA_FILES = {
+    'india_gold_duty.csv':          'India gold import duty timeline',
+    'uae_cb_gold_reserves.csv':     'UAE Central Bank gold reserves',
+    'sge_premium_estimate.csv':     'Shanghai Gold Exchange premium estimates',
+    'dubai_premium_estimate.csv':   'Dubai gold premium/discount estimates',
+    'gold_etf_holdings_estimate.csv': 'Global gold ETF holdings estimates',
+    'india_gold_imports_estimate.csv': 'India gold import estimates',
+    'swiss_gold_to_uae.csv':        'Swiss gold exports to UAE',
+    'turkey_uae_gold.csv':          'Turkey-UAE gold trade',
+    'africa_gold_to_uae.csv':       'African gold exports to UAE',
+    'global_cb_gold_purchases.csv': 'Global central bank gold purchases',
+}
 
 M49_COUNTRY_CODES = {
     0: 'World', 4: 'Afghanistan', 12: 'Algeria', 24: 'Angola', 31: 'Azerbaijan',
@@ -86,8 +110,6 @@ M49_COUNTRY_CODES = {
 # ============================================================
 # BLOOMBERG TICKER MAP
 # ============================================================
-# Maps logical series names to (Bloomberg ticker, field).
-# BDH calls use these to pull historical data.
 BBG_DAILY_TICKERS = {
     'COMEX_Gold_Close_USD':   ('GC1 Comdty', 'PX_LAST'),
     'LBMA_Gold_AM_USD':       ('GOLDLNAM Index', 'PX_LAST'),
@@ -122,8 +144,29 @@ BBG_MONTHLY_TICKERS = {
 }
 
 
+# ============================================================
+# PROXY & LAZY IMPORTS
+# ============================================================
+def configure_proxy(proxy_url):
+    """Set the global proxy dict used by requests and yfinance."""
+    global _PROXY_DICT
+    if proxy_url:
+        _PROXY_DICT = {'http': proxy_url, 'https': proxy_url}
+        print(f"  Proxy configured: {proxy_url}")
+    else:
+        _PROXY_DICT = {}
+
+
+def _get_session():
+    """Return a requests.Session with proxy configured (if any)."""
+    s = requests.Session()
+    if _PROXY_DICT:
+        s.proxies.update(_PROXY_DICT)
+    return s
+
+
 def _ensure_yfinance():
-    """Lazy-import yfinance."""
+    """Lazy-import yfinance and configure its proxy."""
     global yf
     if yf is None:
         import yfinance as _yf
@@ -292,8 +335,6 @@ def collect_daily_market_data_bloomberg(start, end):
                         daily = daily.join(s, how='outer')
                     else:
                         daily = s
-            # Series only available on Bloomberg (LBMA, DGCX, etc.) — skip if unavailable
-            # They'll simply be absent from the output
 
     daily.index = pd.to_datetime(daily.index)
     daily.index.name = 'Date'
@@ -321,10 +362,7 @@ def collect_daily_market_data_bloomberg(start, end):
 
 
 def collect_monthly_bloomberg_data(start, end):
-    """Fetch monthly series from Bloomberg (SGE premium, Dubai premium, ETF holdings, etc.).
-
-    Returns a dict of {col_name: pd.DataFrame} for successfully fetched series.
-    """
+    """Fetch monthly series from Bloomberg (SGE premium, Dubai premium, ETF holdings, etc.)."""
     print("\n  [Bloomberg monthly series]")
     start_str = pd.Timestamp(start).strftime('%Y%m%d')
     end_str = pd.Timestamp(end).strftime('%Y%m%d')
@@ -360,14 +398,17 @@ def fetch_yf_series(ticker, col_name, start, end):
     """Download a single Yahoo Finance series and return a clean DataFrame."""
     _ensure_yfinance()
     try:
-        df = yf.download(ticker, start=start, end=end, progress=False)
+        # Pass proxy to yfinance via session
+        session_obj = None
+        if _PROXY_DICT:
+            session_obj = _get_session()
+        df = yf.download(ticker, start=start, end=end, progress=False,
+                         session=session_obj)
         if 'Close' not in df.columns and len(df.columns) > 0:
-            # Handle multi-level columns from newer yfinance
             if hasattr(df.columns, 'get_level_values'):
                 df.columns = df.columns.get_level_values(0)
         result = df[['Close']].rename(columns={'Close': col_name})
         result.index.name = 'Date'
-        # Flatten any remaining multi-index
         if hasattr(result.columns, 'droplevel'):
             try:
                 result.columns = result.columns.droplevel(1)
@@ -384,7 +425,11 @@ def fetch_yf_multi(ticker, col_map, start, end):
     """Download multiple columns from one Yahoo Finance ticker."""
     _ensure_yfinance()
     try:
-        df = yf.download(ticker, start=start, end=end, progress=False)
+        session_obj = None
+        if _PROXY_DICT:
+            session_obj = _get_session()
+        df = yf.download(ticker, start=start, end=end, progress=False,
+                         session=session_obj)
         if hasattr(df.columns, 'get_level_values'):
             try:
                 df.columns = df.columns.get_level_values(0)
@@ -423,14 +468,10 @@ def collect_daily_market_data(start, end):
         fetch_yf_series("CL=F", "WTI_Crude_USD", start, end),
     ]
 
-    # Remove empty DataFrames
     series = [s for s in series if len(s) > 0]
-
-    # Ensure all indices are DatetimeIndex
     for s in series:
         s.index = pd.to_datetime(s.index)
 
-    # Join all series
     daily = series[0]
     for s in series[1:]:
         daily = daily.join(s, how='outer')
@@ -443,7 +484,7 @@ def collect_daily_market_data(start, end):
     if 'COMEX_Gold_Close_USD' in daily.columns and 'Silver_Close_USD' in daily.columns:
         daily['Gold_Silver_Ratio'] = daily['COMEX_Gold_Close_USD'] / daily['Silver_Close_USD']
     if 'COMEX_Gold_Close_USD' in daily.columns:
-        daily['Gold_AED_oz'] = daily['COMEX_Gold_Close_USD'] * 3.6725  # AED peg
+        daily['Gold_AED_oz'] = daily['COMEX_Gold_Close_USD'] * 3.6725
     if 'COMEX_Gold_Close_USD' in daily.columns and 'USD_INR' in daily.columns:
         daily['Gold_INR_per_10g'] = daily['COMEX_Gold_Close_USD'] * daily['USD_INR'] / 31.1035 * 10
 
@@ -458,7 +499,8 @@ def _comtrade_fetch_periods(reporter_code='784', freq='A'):
     """Query the Comtrade data-availability endpoint and return available periods."""
     url = f"https://comtradeapi.un.org/public/v1/getDA/C/{freq}/HS"
     try:
-        r = requests.get(url, params={'reporterCode': reporter_code}, timeout=30)
+        sess = _get_session()
+        r = sess.get(url, params={'reporterCode': reporter_code}, timeout=30)
         if r.status_code == 200:
             data = r.json()
             return sorted(d.get('period') for d in data.get('data', []))
@@ -477,7 +519,8 @@ def _comtrade_fetch_one(freq, period, flow, reporter='784', cmd='7108'):
         'flowCode': flow,
     }
     try:
-        r = requests.get(base_url, params=params, timeout=30)
+        sess = _get_session()
+        r = sess.get(base_url, params=params, timeout=30)
         if r.status_code == 200:
             data = r.json()
             return data.get('data', [])
@@ -490,9 +533,7 @@ def collect_comtrade_data(start_year, end_year):
     """Fetch UAE gold imports and exports from UN Comtrade public API.
 
     Pulls ANNUAL data for all available years, plus MONTHLY data for any
-    months the UAE has reported (currently 2017-2019).  Returns four
-    DataFrames: annual imports, annual exports, monthly imports, monthly
-    exports.
+    months the UAE has reported (currently 2017-2019).
     """
     print("\n" + "=" * 60)
     print("STEP 2: UN COMTRADE - UAE GOLD TRADE (HS 7108)")
@@ -530,7 +571,6 @@ def collect_comtrade_data(start_year, end_year):
     # --- 2b. Monthly data ---
     print("\n  [Monthly data - checking availability]")
     available_months = _comtrade_fetch_periods('784', 'M')
-    # Filter to requested date range
     available_months = [
         p for p in available_months
         if start_year <= int(str(p)[:4]) <= end_year
@@ -577,63 +617,52 @@ def collect_comtrade_data(start_year, end_year):
 
 
 # ============================================================
-# STEP 3: MANUALLY COMPILED / RESEARCH-BASED DATA
+# STEP 3: FILE-BASED RESEARCH DATA (with Bloomberg overrides)
 # ============================================================
-def collect_research_data(bbg_monthly=None):
-    """Build DataFrames for data compiled from research/reports.
+def _load_csv(data_dir, filename, date_col='Date', parse_dates=True):
+    """Load a CSV from the data directory. Returns DataFrame or empty DataFrame."""
+    path = os.path.join(data_dir, filename)
+    if not os.path.exists(path):
+        print(f"  WARNING: {filename} not found in {data_dir}")
+        return pd.DataFrame()
+    try:
+        if parse_dates and date_col:
+            df = pd.read_csv(path, parse_dates=[date_col])
+        else:
+            df = pd.read_csv(path)
+        return df
+    except Exception as e:
+        print(f"  WARNING: Failed to read {filename}: {e}")
+        return pd.DataFrame()
+
+
+def collect_research_data(data_dir, bbg_monthly=None):
+    """Load research data from CSV files, with optional Bloomberg overrides.
 
     Parameters
     ----------
+    data_dir : str
+        Path to the data/ directory containing the CSV files.
     bbg_monthly : dict or None
         If provided (from Bloomberg), maps col_name -> pd.DataFrame.
-        These replace the estimated research data for those series.
+        These replace the file-based data for those series.
     """
     if bbg_monthly is None:
         bbg_monthly = {}
 
     print("\n" + "=" * 60)
-    print("STEP 3: RESEARCH-BASED DATA (India duty, reserves, premiums, etc.)")
+    print(f"STEP 3: RESEARCH DATA (from {data_dir})")
     print("=" * 60)
 
     # --- India Gold Import Duty ---
-    india_duty = pd.DataFrame({
-        'Date': pd.to_datetime([
-            '2016-01-01', '2017-01-01', '2018-01-01', '2019-01-01',
-            '2020-01-01', '2021-02-01', '2022-07-01', '2023-01-01',
-            '2024-07-23', '2025-01-01', '2026-01-01'
-        ]),
-        'India_Gold_BCD_Pct': [10.0, 10.0, 10.0, 12.5, 12.5, 7.5, 12.5, 15.0, 5.0, 5.0, 5.0],
-        'India_Gold_AIDC_Pct': [0.0, 0.0, 0.0, 0.0, 0.0, 2.5, 2.5, 5.0, 1.0, 1.0, 1.0],
-        'India_Gold_Total_Duty_Pct': [10.0, 10.0, 10.0, 12.5, 12.5, 10.0, 15.0, 20.0, 6.0, 6.0, 6.0],
-        'Source': [
-            'Budget 2013 rate continued', 'Budget 2013 rate continued',
-            'Budget 2013 rate continued', 'Budget 2019 increase',
-            'Budget 2019 rate continued', 'Budget 2021 reduction',
-            'Budget 2022 increase', 'Budget 2023 increase (BCD 12.5% + AIDC 5% + cess)',
-            'Budget 2024 reduction', 'Budget 2024 rate continued',
-            'Budget 2024 rate continued',
-        ]
-    })
+    india_duty = _load_csv(data_dir, 'india_gold_duty.csv')
     print(f"  India duty timeline: {len(india_duty)} entries")
 
     # --- UAE Central Bank Gold Reserves ---
-    uae_reserves = pd.DataFrame({
-        'Date': pd.to_datetime([
-            '2016-12-31', '2017-12-31', '2018-12-31', '2019-12-31',
-            '2020-12-31', '2021-12-31', '2022-12-31', '2023-12-31',
-            '2024-06-30', '2024-12-31', '2025-06-30', '2025-12-31'
-        ]),
-        'UAE_CB_Gold_Reserves_Tonnes': [
-            1.9, 2.7, 3.1, 5.5, 12.1, 55.3, 55.3, 74.2, 74.5, 85.0, 95.0, 110.0
-        ],
-        'UAE_CB_Gold_Reserves_USD_Bn': [
-            0.07, 0.10, 0.12, 0.26, 0.69, 3.20, 3.10, 4.80, 5.50, 6.25, 7.90, 10.32
-        ],
-        'Source': 'World Gold Council / Trading Economics / CBUAE'
-    })
+    uae_reserves = _load_csv(data_dir, 'uae_cb_gold_reserves.csv')
     print(f"  UAE CB reserves: {len(uae_reserves)} entries")
 
-    # --- Shanghai Gold Exchange Premium (monthly estimate or Bloomberg) ---
+    # --- SGE Premium (Bloomberg override or file) ---
     if 'SGE_Premium_USD_oz' in bbg_monthly:
         df_bbg = bbg_monthly['SGE_Premium_USD_oz'].copy()
         df_bbg.index = df_bbg.index.to_period('M').to_timestamp()
@@ -642,37 +671,10 @@ def collect_research_data(bbg_monthly=None):
         sge_premium['Source'] = 'Bloomberg (GLDPSGP Index)'
         print(f"  SGE premium: {len(sge_premium)} months [Bloomberg]")
     else:
-        sge_dates = pd.date_range('2016-01-01', '2025-12-01', freq='MS')
-        sge_vals = []
-        for d in sge_dates:
-            y, m = d.year, d.month
-            if y == 2016: v = 5 + (m % 4)
-            elif y == 2017: v = 8 + (m % 5)
-            elif y == 2018: v = 7 + (m % 4) - 2
-            elif y == 2019: v = 10 + (m % 6)
-            elif y == 2020:
-                if m <= 3: v = 25 + m * 3
-                elif m <= 6: v = -5
-                else: v = 15 + (m % 3)
-            elif y == 2021: v = 5 + (m % 5) - 1
-            elif y == 2022:
-                if m <= 4: v = 15 + m * 2
-                elif m <= 8: v = -10
-                else: v = 20 + (m % 3)
-            elif y == 2023: v = 30 + (m % 8)
-            elif y == 2024: v = 35 + (m % 10)
-            elif y == 2025:
-                if m <= 4: v = 40 + m * 2
-                else: v = 25 + (m % 5)
-            else: v = 25
-            sge_vals.append(v)
-        sge_premium = pd.DataFrame({
-            'Date': sge_dates, 'SGE_Premium_USD_oz': sge_vals,
-            'Source': 'Estimated from World Gold Council & market reports'
-        })
-        print(f"  SGE premium: {len(sge_premium)} months [estimated]")
+        sge_premium = _load_csv(data_dir, 'sge_premium_estimate.csv')
+        print(f"  SGE premium: {len(sge_premium)} months [file]")
 
-    # --- Dubai Premium/Discount vs London (monthly estimate or Bloomberg) ---
+    # --- Dubai Premium (Bloomberg override or file) ---
     if 'Dubai_Premium_USD_oz' in bbg_monthly:
         df_bbg = bbg_monthly['Dubai_Premium_USD_oz'].copy()
         df_bbg.index = df_bbg.index.to_period('M').to_timestamp()
@@ -681,35 +683,10 @@ def collect_research_data(bbg_monthly=None):
         dubai_premium['Source'] = 'Bloomberg (GLDPDXB Index)'
         print(f"  Dubai premium: {len(dubai_premium)} months [Bloomberg]")
     else:
-        dubai_dates = pd.date_range('2016-01-01', '2025-12-01', freq='MS')
-        dubai_vals = []
-        for d in dubai_dates:
-            y, m = d.year, d.month
-            if y <= 2018: base = 0.50
-            elif y == 2019: base = 0.75
-            elif y == 2020:
-                if m <= 4: base = -1.50
-                elif m <= 8: base = -0.50
-                else: base = 1.00
-            elif y == 2021: base = 0.50
-            elif y == 2022: base = 1.00
-            elif y == 2023: base = 1.50
-            elif y == 2024: base = 2.00
-            elif y == 2025:
-                if m <= 2: base = -1.00
-                else: base = 0.50
-            else: base = 0.50
-            if m in [10, 11]: base += 0.80
-            elif m in [1, 2]: base += 0.30
-            elif m in [6, 7]: base -= 0.40
-            dubai_vals.append(round(base, 2))
-        dubai_premium = pd.DataFrame({
-            'Date': dubai_dates, 'Dubai_Premium_USD_oz': dubai_vals,
-            'Source': 'Estimated from Reuters/LBMA market reports'
-        })
-        print(f"  Dubai premium: {len(dubai_premium)} months [estimated]")
+        dubai_premium = _load_csv(data_dir, 'dubai_premium_estimate.csv')
+        print(f"  Dubai premium: {len(dubai_premium)} months [file]")
 
-    # --- Global Gold ETF Holdings (monthly estimate or Bloomberg) ---
+    # --- Gold ETF Holdings (Bloomberg override or file) ---
     if 'Global_Gold_ETF_Holdings_Tonnes' in bbg_monthly:
         df_bbg = bbg_monthly['Global_Gold_ETF_Holdings_Tonnes'].copy()
         df_bbg.index = df_bbg.index.to_period('M').to_timestamp()
@@ -718,107 +695,40 @@ def collect_research_data(bbg_monthly=None):
         gold_etf['Source'] = 'Bloomberg (TGOLDTOT Index)'
         print(f"  Gold ETF holdings: {len(gold_etf)} months [Bloomberg]")
     else:
-        etf_dates = pd.date_range('2016-01-01', '2025-12-01', freq='MS')
-        etf_vals = []
-        for d in etf_dates:
-            y, m = d.year, d.month
-            if y == 2016: b = 1600 + m * 30
-            elif y == 2017: b = 2100 + m * 5
-            elif y == 2018: b = 2200 - m * 10
-            elif y == 2019: b = 2100 + m * 20
-            elif y == 2020:
-                b = 2400 + m * 50 if m <= 8 else 3900 - (m - 8) * 30
-            elif y == 2021: b = 3600 - m * 25
-            elif y == 2022: b = 3300 - m * 20
-            elif y == 2023: b = 3100 - m * 5
-            elif y == 2024: b = 3050 + m * 10
-            elif y == 2025: b = 3200 + m * 50
-            else: b = 3500
-            etf_vals.append(round(b))
-        gold_etf = pd.DataFrame({
-            'Date': etf_dates, 'Global_Gold_ETF_Holdings_Tonnes': etf_vals,
-            'Source': 'World Gold Council / Bloomberg estimates'
-        })
-        print(f"  Gold ETF holdings: {len(gold_etf)} months [estimated]")
+        gold_etf = _load_csv(data_dir, 'gold_etf_holdings_estimate.csv')
+        print(f"  Gold ETF holdings: {len(gold_etf)} months [file]")
 
-    # --- India Gold Imports (monthly estimate or Bloomberg) ---
+    # --- India Gold Imports (Bloomberg override or file) ---
     if 'India_Gold_Imports_USD_Bn' in bbg_monthly:
         df_bbg = bbg_monthly['India_Gold_Imports_USD_Bn'].copy()
         df_bbg.index = df_bbg.index.to_period('M').to_timestamp()
         india_gold_imports = df_bbg.reset_index().rename(columns={'index': 'Date'})
         india_gold_imports.columns = ['Date', 'India_Gold_Imports_USD_Bn']
-        # INGDIMPM is typically in USD millions; convert to billions
         if india_gold_imports['India_Gold_Imports_USD_Bn'].median() > 100:
             india_gold_imports['India_Gold_Imports_USD_Bn'] /= 1000.0
         india_gold_imports['Source'] = 'Bloomberg (INGDIMPM Index)'
         print(f"  India gold imports: {len(india_gold_imports)} months [Bloomberg]")
     else:
-        india_dates = pd.date_range('2016-01-01', '2025-12-01', freq='MS')
-        india_vals = []
-        for d in india_dates:
-            y, m = d.year, d.month
-            if y == 2016: base = 2.5
-            elif y == 2017: base = 2.8
-            elif y == 2018: base = 2.7
-            elif y == 2019: base = 2.2
-            elif y == 2020:
-                base = 0.3 if m <= 4 else 2.0
-            elif y == 2021: base = 3.5
-            elif y == 2022: base = 3.0
-            elif y == 2023: base = 3.5
-            elif y == 2024:
-                base = 8.0 if m >= 8 else 3.5
-            elif y == 2025: base = 4.5
-            else: base = 4.0
-            if m in [10, 11]: base *= 1.6
-            elif m in [4, 5]: base *= 1.3
-            elif m in [7, 8]: base *= 0.8
-            india_vals.append(round(base, 2))
-        india_gold_imports = pd.DataFrame({
-            'Date': india_dates, 'India_Gold_Imports_USD_Bn': india_vals,
-            'Source': 'DGCIS / Ministry of Commerce India estimates'
-        })
-        print(f"  India gold imports: {len(india_gold_imports)} months [estimated]")
+        india_gold_imports = _load_csv(data_dir, 'india_gold_imports_estimate.csv')
+        print(f"  India gold imports: {len(india_gold_imports)} months [file]")
 
-    # --- Swiss Gold Exports to UAE (annual) ---
-    swiss_to_uae = pd.DataFrame({
-        'Year': list(range(2016, 2026)),
-        'Swiss_Gold_Export_to_UAE_Tonnes': [210, 185, 170, 190, 160, 220, 250, 280, 310, 290],
-        'Swiss_Gold_Export_to_UAE_USD_Bn': [8.5, 7.9, 7.2, 8.4, 8.5, 12.0, 14.5, 17.5, 22.0, 24.0],
-    })
+    # --- Swiss Gold Exports to UAE ---
+    swiss_to_uae = _load_csv(data_dir, 'swiss_gold_to_uae.csv', date_col=None, parse_dates=False)
     print(f"  Swiss->UAE gold: {len(swiss_to_uae)} years")
 
-    # --- Turkey-UAE Gold Trade (annual) ---
-    turkey_uae = pd.DataFrame({
-        'Year': list(range(2016, 2026)),
-        'Turkey_Gold_Export_to_UAE_USD_Bn': [1.2, 2.8, 4.5, 3.2, 2.1, 5.8, 6.2, 1.9, 2.5, 2.0],
-        'Turkey_Gold_Import_from_UAE_USD_Bn': [0.8, 1.5, 2.1, 1.8, 1.2, 3.5, 4.0, 1.5, 2.0, 1.8],
-    })
+    # --- Turkey-UAE Gold Trade ---
+    turkey_uae = _load_csv(data_dir, 'turkey_uae_gold.csv', date_col=None, parse_dates=False)
     print(f"  Turkey<->UAE gold: {len(turkey_uae)} years")
 
-    # --- African Gold Exports to UAE (annual) ---
-    africa_records = []
-    countries = {
-        'Ghana': [3.5, 3.8, 4.2, 4.5, 3.8, 5.2, 6.0, 7.5, 8.0, 7.5],
-        'Uganda': [0.2, 0.3, 0.5, 0.8, 1.2, 1.8, 2.3, 2.3, 3.0, 3.5],
-        'Tanzania': [0.5, 0.6, 0.8, 1.0, 0.9, 1.5, 2.0, 2.5, 3.0, 2.8],
-        'South_Africa': [2.0, 2.2, 2.5, 2.3, 2.0, 2.8, 3.0, 3.5, 4.0, 3.8],
-        'DRC': [0.3, 0.4, 0.5, 0.7, 0.8, 1.2, 1.5, 2.0, 2.5, 2.2],
-    }
-    for country, values in countries.items():
-        for i, year in enumerate(range(2016, 2026)):
-            africa_records.append({'Year': year, 'Country': country, 'Gold_Export_to_UAE_USD_Bn': values[i]})
-    africa_uae = pd.DataFrame(africa_records)
+    # --- African Gold Exports to UAE ---
+    africa_uae = _load_csv(data_dir, 'africa_gold_to_uae.csv', date_col=None, parse_dates=False)
     print(f"  Africa->UAE gold: {len(africa_uae)} records")
 
-    # --- Global Central Bank Gold Purchases (annual) ---
-    cb_purchases = pd.DataFrame({
-        'Year': list(range(2016, 2026)),
-        'Global_CB_Gold_Purchases_Tonnes': [383, 375, 651, 650, 255, 463, 1082, 1037, 1045, 900],
-    })
+    # --- Global Central Bank Gold Purchases ---
+    cb_purchases = _load_csv(data_dir, 'global_cb_gold_purchases.csv', date_col=None, parse_dates=False)
     print(f"  Global CB purchases: {len(cb_purchases)} years")
 
-    # --- Extra Bloomberg-only monthly series (pass through if available) ---
+    # --- Extra Bloomberg-only monthly series ---
     bbg_extras = {}
     for col_name in ['Global_Gold_Mine_Supply_Tonnes', 'Gold_COMEX_Open_Interest', 'Gold_CFTC_Net_Long']:
         if col_name in bbg_monthly:
@@ -861,12 +771,15 @@ def build_monthly(daily, research):
         ('gold_etf', 'Global_Gold_ETF_Holdings_Tonnes'),
         ('india_gold_imports', 'India_Gold_Imports_USD_Bn'),
     ]:
-        s = research[src_key].set_index('Date')[[col]]
-        monthly = monthly.join(s, how='left')
+        df = research[src_key]
+        if len(df) > 0 and col in df.columns:
+            s = df.set_index('Date')[[col]]
+            monthly = monthly.join(s, how='left')
 
-    duty_ts = research['india_duty'].set_index('Date')[['India_Gold_Total_Duty_Pct']]
-    duty_monthly = duty_ts.reindex(monthly.index, method='ffill')
-    monthly = monthly.join(duty_monthly, how='left')
+    if len(research['india_duty']) > 0 and 'India_Gold_Total_Duty_Pct' in research['india_duty'].columns:
+        duty_ts = research['india_duty'].set_index('Date')[['India_Gold_Total_Duty_Pct']]
+        duty_monthly = duty_ts.reindex(monthly.index, method='ffill')
+        monthly = monthly.join(duty_monthly, how='left')
 
     # Join any Bloomberg-only extras
     for col_name, df_extra in research.get('bbg_extras', {}).items():
@@ -908,16 +821,10 @@ def build_trade_by_partner(uae_imports, uae_exports):
 
 
 def build_monthly_trade(mon_imports, mon_exports):
-    """Build a monthly trade sheet from Comtrade monthly data.
-
-    Returns two DataFrames:
-      - monthly_trade_agg: monthly totals (Date index, import/export value & weight)
-      - monthly_trade_partner: monthly by-partner breakdown (top 15 import + export partners)
-    """
+    """Build monthly trade sheets from Comtrade monthly data."""
     if len(mon_imports) == 0 and len(mon_exports) == 0:
         return pd.DataFrame(), pd.DataFrame()
 
-    # --- Monthly aggregates: use World row if available, else sum partners ---
     agg_parts = []
     for df, val_col, wt_col, prefix in [
         (mon_imports, 'Import_Value_USD', 'Import_NetWeight_Kg', 'Import'),
@@ -957,7 +864,6 @@ def build_monthly_trade(mon_imports, mon_exports):
     else:
         monthly_agg = pd.DataFrame()
 
-    # --- Monthly by-partner pivot (top 15 per side) ---
     partner_dfs = []
     for df, prefix, val_col in [
         (mon_imports, 'Imp', 'Import_Value_USD'),
@@ -968,7 +874,6 @@ def build_monthly_trade(mon_imports, mon_exports):
         partners = df[~df['Partner'].isin(['World', 'Areas, nes'])]
         if len(partners) == 0:
             continue
-        # Determine top 15 partners across all months
         totals = partners.groupby('Partner')[val_col].sum().nlargest(15)
         top15 = totals.index.tolist()
         filtered = partners[partners['Partner'].isin(top15)]
@@ -998,8 +903,6 @@ def build_annual_aggregate(uae_imports, uae_exports, research):
         val_col = f'{prefix}_Value_USD'
         wt_col = f'{prefix}_NetWeight_Kg'
 
-        # Use "World" row where available; otherwise sum all partners per year.
-        # Build year-by-year to handle mixed availability.
         yearly_rows = []
         for year, grp in df.groupby('Year'):
             world_row = grp[grp['Partner'] == 'World']
@@ -1010,7 +913,6 @@ def build_annual_aggregate(uae_imports, uae_exports, research):
                     wt_col: world_row[wt_col].sum(),
                 })
             else:
-                # Sum partner-level data (exclude duplicates like "Areas, nes")
                 partners = grp[~grp['Partner'].isin(['World', 'Areas, nes'])]
                 yearly_rows.append({
                     'Year': year,
@@ -1041,20 +943,25 @@ def build_annual_aggregate(uae_imports, uae_exports, research):
 
     # Join annual research data
     for key in ['swiss_to_uae', 'turkey_uae', 'cb_purchases']:
-        src = research[key].set_index('Year').drop(columns=['Source'], errors='ignore')
-        yearly_trade = yearly_trade.join(src, how='outer')
+        src = research[key]
+        if len(src) > 0 and 'Year' in src.columns:
+            src = src.set_index('Year').drop(columns=['Source'], errors='ignore')
+            yearly_trade = yearly_trade.join(src, how='outer')
 
     # UAE reserves by year
-    res = research['uae_reserves'].copy()
-    res['Year'] = res['Date'].dt.year
-    res = res.groupby('Year').last()[['UAE_CB_Gold_Reserves_Tonnes', 'UAE_CB_Gold_Reserves_USD_Bn']]
-    yearly_trade = yearly_trade.join(res, how='outer')
+    res = research['uae_reserves']
+    if len(res) > 0 and 'Date' in res.columns:
+        res = res.copy()
+        res['Year'] = pd.to_datetime(res['Date']).dt.year
+        res = res.groupby('Year').last()[['UAE_CB_Gold_Reserves_Tonnes', 'UAE_CB_Gold_Reserves_USD_Bn']]
+        yearly_trade = yearly_trade.join(res, how='outer')
 
     # Africa pivot
     africa = research['africa_uae']
-    africa_pivot = africa.pivot_table(index='Year', columns='Country', values='Gold_Export_to_UAE_USD_Bn', aggfunc='sum')
-    africa_pivot.columns = [f"Africa_{c}_to_UAE_USD_Bn" for c in africa_pivot.columns]
-    yearly_trade = yearly_trade.join(africa_pivot, how='outer')
+    if len(africa) > 0 and 'Year' in africa.columns:
+        africa_pivot = africa.pivot_table(index='Year', columns='Country', values='Gold_Export_to_UAE_USD_Bn', aggfunc='sum')
+        africa_pivot.columns = [f"Africa_{c}_to_UAE_USD_Bn" for c in africa_pivot.columns]
+        yearly_trade = yearly_trade.join(africa_pivot, how='outer')
 
     return yearly_trade
 
@@ -1089,25 +996,24 @@ def build_data_dictionary(use_bloomberg=False):
          'Daily', 'Bloomberg (XAUAED Curncy)' if use_bloomberg else 'Computed (3.6725 peg)'),
         ('Gold_INR_per_10g', 'Gold price in INR per 10 grams', 'Daily', 'Computed'),
         ('SGE_Premium_USD_oz', 'Shanghai Gold Exchange premium over London spot (USD/oz)',
-         'Monthly', 'Bloomberg (GLDPSGP Index)' if use_bloomberg else 'WGC / Market reports (est.)'),
+         'Monthly', 'Bloomberg (GLDPSGP Index)' if use_bloomberg else 'data/sge_premium_estimate.csv'),
         ('Dubai_Premium_USD_oz', 'Dubai gold premium/discount vs London spot (USD/oz)',
-         'Monthly', 'Bloomberg (GLDPDXB Index)' if use_bloomberg else 'Reuters / LBMA (est.)'),
+         'Monthly', 'Bloomberg (GLDPDXB Index)' if use_bloomberg else 'data/dubai_premium_estimate.csv'),
         ('Global_Gold_ETF_Holdings_Tonnes', 'Global Gold ETF total holdings (tonnes)',
-         'Monthly', 'Bloomberg (TGOLDTOT Index)' if use_bloomberg else 'WGC / Bloomberg (est.)'),
+         'Monthly', 'Bloomberg (TGOLDTOT Index)' if use_bloomberg else 'data/gold_etf_holdings_estimate.csv'),
         ('India_Gold_Imports_USD_Bn', 'India monthly gold import value (USD billions)',
-         'Monthly', 'Bloomberg (INGDIMPM Index)' if use_bloomberg else 'DGCIS / MoC India (est.)'),
-        ('India_Gold_Total_Duty_Pct', 'India total gold import duty rate (%)', 'Event-based', 'India Union Budget / CBIC'),
-        ('UAE_CB_Gold_Reserves_Tonnes', 'UAE Central Bank gold reserves (tonnes)', 'Semi-annual', 'WGC / CBUAE'),
-        ('Global_CB_Gold_Purchases_Tonnes', 'Global central bank net gold purchases (annual, tonnes)', 'Annual', 'World Gold Council'),
-        ('Swiss_Gold_Export_to_UAE_Tonnes', 'Swiss gold exports to UAE (annual, tonnes)', 'Annual', 'Swiss Customs (BAZG)'),
-        ('Turkey_Gold_Export_to_UAE_USD_Bn', 'Turkey gold exports to UAE (annual, USD billions)', 'Annual', 'TurkStat / UN Comtrade'),
+         'Monthly', 'Bloomberg (INGDIMPM Index)' if use_bloomberg else 'data/india_gold_imports_estimate.csv'),
+        ('India_Gold_Total_Duty_Pct', 'India total gold import duty rate (%)', 'Event-based', 'data/india_gold_duty.csv'),
+        ('UAE_CB_Gold_Reserves_Tonnes', 'UAE Central Bank gold reserves (tonnes)', 'Semi-annual', 'data/uae_cb_gold_reserves.csv'),
+        ('Global_CB_Gold_Purchases_Tonnes', 'Global central bank net gold purchases (annual, tonnes)', 'Annual', 'data/global_cb_gold_purchases.csv'),
+        ('Swiss_Gold_Export_to_UAE_Tonnes', 'Swiss gold exports to UAE (annual, tonnes)', 'Annual', 'data/swiss_gold_to_uae.csv'),
+        ('Turkey_Gold_Export_to_UAE_USD_Bn', 'Turkey gold exports to UAE (annual, USD billions)', 'Annual', 'data/turkey_uae_gold.csv'),
         ('Total_Import_Value_USD', 'UAE total gold imports value (annual, USD) - HS 7108', 'Annual', 'UN Comtrade HS 7108'),
         ('Total_Import_Weight_Kg', 'UAE total gold imports weight (annual, Kg) - HS 7108', 'Annual', 'UN Comtrade HS 7108'),
         ('Total_Export_Value_USD', 'UAE total gold exports value (annual, USD) - HS 7108', 'Annual', 'UN Comtrade HS 7108'),
         ('Total_Export_Weight_Kg', 'UAE total gold exports weight (annual, Kg) - HS 7108', 'Annual', 'UN Comtrade HS 7108'),
     ]
 
-    # Bloomberg-only series
     if use_bloomberg:
         rows.extend([
             ('LBMA_Gold_AM_USD', 'LBMA Gold AM Fix (USD/oz)', 'Daily', 'Bloomberg (GOLDLNAM Index)'),
@@ -1142,7 +1048,6 @@ def write_excel(output_path, daily, monthly, trade_by_partner, yearly_agg,
     print("STEP 5: WRITING EXCEL WORKBOOK")
     print("=" * 60)
 
-    # Write data
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         daily.to_excel(writer, sheet_name='Daily_Market_Data')
         monthly.to_excel(writer, sheet_name='Monthly_Data')
@@ -1158,7 +1063,6 @@ def write_excel(output_path, daily, monthly, trade_by_partner, yearly_agg,
 
     print("  Data written. Formatting...")
 
-    # Format
     wb = load_workbook(output_path)
     hdr_font = Font(name='Arial', bold=True, size=10, color='FFFFFF')
     hdr_fill = PatternFill('solid', fgColor='1F4E79')
@@ -1225,7 +1129,8 @@ def write_excel(output_path, daily, monthly, trade_by_partner, yearly_agg,
         ['DATA QUALITY NOTES:'],
         [f'- Daily market data: {daily_source}'],
         ['- UN Comtrade trade: Official government-reported statistics'],
-        ['- Premium estimates (Dubai, SGE): Bloomberg if --bloomberg, else estimated from reports'],
+        ['- Research data loaded from CSV files in data/ folder (editable)'],
+        ['- Bloomberg mode replaces estimates with terminal data where available'],
         ['- Annual flows (Swiss, Turkey, Africa): Estimates from multiple public sources'],
         ['- India duty: Official Union Budget rates'],
         ['- Bloomberg mode adds: LBMA fixes, DGCX, real rates, CFTC positioning, mine supply'],
@@ -1235,7 +1140,7 @@ def write_excel(output_path, daily, monthly, trade_by_partner, yearly_agg,
 
     ws_cover['A1'].font = Font(name='Arial', bold=True, size=16, color='1F4E79')
     ws_cover.merge_cells('A1:D1')
-    for cell in ws_cover[7]:
+    for cell in ws_cover[8]:
         cell.font = hdr_font
         cell.fill = hdr_fill
     ws_cover.column_dimensions['A'].width = 28
@@ -1260,6 +1165,12 @@ def main():
     parser.add_argument('--bloomberg', action='store_true',
                         help='Use Bloomberg Terminal (blpapi) for market data instead of Yahoo Finance. '
                              'Requires Bloomberg Terminal running with DAPI enabled and blpapi installed.')
+    parser.add_argument('--proxy', default=None,
+                        help='Proxy URL for all HTTP requests (yfinance, Comtrade, etc.). '
+                             'Examples: http://127.0.0.1:8080, socks5://127.0.0.1:1080, '
+                             'http://user:pass@proxy.corp.com:3128')
+    parser.add_argument('--data-dir', default=DEFAULT_DATA_DIR,
+                        help=f'Path to directory containing research CSV files (default: ./data)')
     args = parser.parse_args()
 
     start_year = int(args.start[:4])
@@ -1269,7 +1180,23 @@ def main():
     print(f"Period: {args.start} to {args.end}")
     print(f"Output: {args.output}")
     print(f"Mode:   {'Bloomberg Terminal' if args.bloomberg else 'Yahoo Finance (default)'}")
+    print(f"Data:   {args.data_dir}")
+    if args.proxy:
+        print(f"Proxy:  {args.proxy}")
     print(f"{'=' * 60}")
+
+    # Configure proxy
+    configure_proxy(args.proxy)
+
+    # Validate data directory
+    if not os.path.isdir(args.data_dir):
+        print(f"\n  WARNING: Data directory not found: {args.data_dir}")
+        print(f"  Research data will be empty. Create the directory with CSV files.")
+        print(f"  Expected files: {', '.join(DATA_FILES.keys())}")
+    else:
+        missing = [f for f in DATA_FILES if not os.path.exists(os.path.join(args.data_dir, f))]
+        if missing:
+            print(f"\n  WARNING: Missing data files: {', '.join(missing)}")
 
     # Step 1: Daily market data
     daily_source = 'Yahoo Finance'
@@ -1279,7 +1206,6 @@ def main():
         try:
             _ensure_blpapi()
             daily, daily_source = collect_daily_market_data_bloomberg(args.start, args.end)
-            # Also fetch monthly Bloomberg series
             bbg_monthly_data = collect_monthly_bloomberg_data(args.start, args.end)
         except ImportError:
             print("\n  ERROR: blpapi not installed. Install with: pip install blpapi")
@@ -1292,7 +1218,7 @@ def main():
     else:
         daily = collect_daily_market_data(args.start, args.end)
 
-    # Step 2: UN Comtrade trade data (annual + monthly)
+    # Step 2: UN Comtrade trade data
     if args.skip_comtrade:
         print("\n  Skipping Comtrade (--skip-comtrade flag)")
         ann_imports, ann_exports = pd.DataFrame(), pd.DataFrame()
@@ -1300,8 +1226,8 @@ def main():
     else:
         ann_imports, ann_exports, mon_imports, mon_exports = collect_comtrade_data(start_year, end_year)
 
-    # Step 3: Research-based data (with Bloomberg overrides where available)
-    research = collect_research_data(bbg_monthly=bbg_monthly_data)
+    # Step 3: Research-based data
+    research = collect_research_data(args.data_dir, bbg_monthly=bbg_monthly_data)
 
     # Step 4: Build sheets
     print("\n" + "=" * 60)
