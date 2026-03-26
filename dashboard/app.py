@@ -31,6 +31,7 @@ from . import theme as T
 from .components import kpi_card, spread_chart, legs_chart, zscore_heatmap, summary_table
 from .trade_analytics import build_trade_analytics_tab
 from .seasonality import build_seasonality_tab, build_seasonality_charts
+from .pivot_table import build_pivot_tab, build_pivot_content
 from src.bbg_client import BloombergClient
 from src.data_manager import DataManager
 from src.spread_engine import SpreadEngine, SpreadResult
@@ -185,6 +186,15 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
                         value="tab-seasonality",
                         children=[
                             html.Div(id="seasonality-tab-content"),
+                        ],
+                    ),
+
+                    # Tab 4: Precious Metals Trade Pivot
+                    dcc.Tab(
+                        label="Trade Pivot",
+                        value="tab-pivot",
+                        children=[
+                            html.Div(id="pivot-tab-content"),
                         ],
                     ),
                 ],
@@ -381,6 +391,73 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
             return html.Div(
                 "Failed to load seasonality data. The data may not be cached yet — "
                 "check network connectivity or try again.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
+
+    # Callback for pivot tab — render controls on tab switch
+    @app.callback(
+        Output("pivot-tab-content", "children"),
+        Input("main-tabs", "value"),
+    )
+    def update_pivot_tab(active_tab):
+        if active_tab != "tab-pivot":
+            return html.Div()
+        try:
+            return build_pivot_tab()
+        except Exception:
+            logger.exception("Failed to build pivot tab")
+            return html.Div(
+                "Failed to load pivot table. Check data sources.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
+
+    # Callback for pivot content — update on control changes
+    @app.callback(
+        Output("pivot-content", "children"),
+        Input("pivot-commodity", "value"),
+        Input("pivot-reporter", "value"),
+        Input("pivot-flow", "value"),
+        Input("pivot-start-year", "value"),
+        Input("pivot-end-year", "value"),
+        Input("pivot-rows", "value"),
+        Input("pivot-cols", "value"),
+        Input("pivot-values", "value"),
+        Input("pivot-agg", "value"),
+        Input("pivot-refresh-btn", "n_clicks"),
+        prevent_initial_call=False,
+    )
+    def update_pivot_content(
+        commodities, reporters, flow, start_year, end_year,
+        row_axis, col_axis, value_col, agg_func, n_clicks,
+    ):
+        from dash import callback_context as ctx
+        force = False
+        if ctx.triggered:
+            trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+            force = trigger_id == "pivot-refresh-btn" and (n_clicks or 0) > 0
+
+        if not commodities or not reporters:
+            return html.Div(
+                "Select at least one commodity and one reporter country.",
+                style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
+            )
+        try:
+            return build_pivot_content(
+                commodities=commodities if isinstance(commodities, list) else [commodities],
+                reporters=reporters if isinstance(reporters, list) else [reporters],
+                flow=flow or "MX",
+                start_year=start_year or 2018,
+                end_year=end_year or 2026,
+                row_axis=row_axis or "reporter",
+                col_axis=col_axis or "commodity",
+                value_col=value_col or "value_usd",
+                agg_func=agg_func or "sum",
+                force_refresh=force,
+            )
+        except Exception:
+            logger.exception("Failed to build pivot content")
+            return html.Div(
+                "Failed to build pivot table. Check data sources or try refreshing.",
                 style={"color": T.TEXT_MUTED, "padding": "40px", "textAlign": "center"},
             )
 
