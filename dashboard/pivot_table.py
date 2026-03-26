@@ -29,9 +29,21 @@ _client: ComtradeBulkClient | None = None
 
 
 def _get_client() -> ComtradeBulkClient:
+    """Get or create the bulk client with proxy from config."""
     global _client
     if _client is None:
-        _client = ComtradeBulkClient()
+        import os, yaml
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        proxy_url = os.environ.get("PREMIUM_DASH_PROXY")
+        if not proxy_url:
+            cfg_path = project_root / "config" / "spreads.yaml"
+            if cfg_path.exists():
+                with open(cfg_path) as f:
+                    cfg = yaml.safe_load(f) or {}
+                proxy_url = cfg.get("settings", {}).get("network", {}).get("proxy_url")
+        _client = ComtradeBulkClient(proxy_url=proxy_url)
     return _client
 
 

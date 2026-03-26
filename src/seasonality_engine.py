@@ -273,6 +273,11 @@ class SeasonalityEngine:
         pivot["_abs_total"] = pivot.abs().sum(axis=1)
         pivot = pivot.sort_values("_abs_total", ascending=False).drop(columns="_abs_total")
 
+        # Store latest data month as attribute so the UI can flag it
+        latest_month_name = MONTH_NAMES[max_date.month - 1]
+        pivot.attrs["latest_month"] = latest_month_name
+        pivot.attrs["latest_date"] = max_date.strftime("%b %Y")
+
         return pivot
 
     def get_recent_vs_seasonal(

@@ -141,12 +141,19 @@ def _build_breakdown_heatmap(
     # Clamp z-scores for display
     display = data.clip(-3, 3)
 
+    # Get latest month from DataFrame attrs (set by engine)
+    latest_month = data.attrs.get("latest_month")
+    latest_date = data.attrs.get("latest_date", "")
+
+    # Build text annotations — mark latest month cells with ◄ indicator
     text_matrix = []
     for _, row in display.iterrows():
         row_text = []
-        for v in row:
+        for col_name, v in row.items():
             if pd.isna(v):
                 row_text.append("")
+            elif col_name == latest_month:
+                row_text.append(f"{v:+.1f}σ ◄")
             else:
                 row_text.append(f"{v:+.1f}σ")
         text_matrix.append(row_text)
@@ -176,13 +183,27 @@ def _build_breakdown_heatmap(
     n_partners = len(display)
     height = max(300, min(700, 80 + n_partners * 28))
 
+    # Highlight the latest month column with a vertical line + annotation
+    if latest_month and latest_month in display.columns:
+        col_idx = display.columns.tolist().index(latest_month)
+        fig.add_vline(
+            x=col_idx, line_width=2, line_dash="solid",
+            line_color=T.ACCENT_CYAN, opacity=0.8,
+        )
+        fig.add_annotation(
+            x=col_idx, y=-0.12, yref="paper",
+            text=f"▲ Latest: {latest_date}",
+            showarrow=False,
+            font=dict(size=10, color=T.ACCENT_CYAN, weight="bold"),
+        )
+
     fig.update_layout(
         **_base_layout(
             title=title,
             xaxis=dict(side="top", tickfont=dict(size=11), dtick=1),
             yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
             height=height,
-            margin=dict(l=140, r=40, t=60, b=20),
+            margin=dict(l=140, r=40, t=60, b=30),
         )
     )
 
@@ -438,6 +459,12 @@ def build_seasonality_charts(
         title=f"{country_name} — Recent {flow_label} Deviation from Seasonal Norm (last {recent_months}mo, {zscore_label})",
     )
 
+    # Get latest data point info from breakdown attrs
+    latest_date_str = breakdown.attrs.get("latest_date", "")
+    latest_badge = ""
+    if latest_date_str:
+        latest_badge = f"  Latest data point: {latest_date_str} (marked with ◄ and cyan line)."
+
     sections.append(
         html.Div(
             style={**T.CARD_STYLE, "marginBottom": "20px"},
@@ -456,7 +483,8 @@ def build_seasonality_charts(
                         html.P(
                             "Z-scores show how recent months deviate from historical seasonal averages. "
                             "Red (positive): unusually high trade. Blue (negative): unusually low. "
-                            "Values beyond +/-2 sigma suggest a potential breakdown in the seasonal pattern.",
+                            "Values beyond ±2σ suggest a potential breakdown in the seasonal pattern."
+                            + latest_badge,
                             style={"fontSize": "12px", "margin": "0"},
                         ),
                     ],
