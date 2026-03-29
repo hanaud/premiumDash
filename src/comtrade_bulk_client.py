@@ -486,22 +486,27 @@ class ComtradeBulkClient:
         """
         Ingest a GACC CSV (from manual browser extraction) into the pipeline.
 
-        Expected CSV columns (flexible matching):
-          - Partner / Country / partner
-          - Period / Month / YYYYMM / period
-          - Value / Trade Value / value_usd (USD)
-          - Weight / Quantity / net_weight_kg (kg, optional)
+        Supports two formats:
+          A) Aggregate (no partner): period, value_usd [, hs_code, commodity, flow]
+             → partner set to "World" (total China trade)
+          B) Partner-level: partner, period, value_usd [, net_weight_kg]
 
         Saves as parquet in data/gold_trade/gacc/gacc_{hs}_{flow}_{year_range}.parquet
         """
         csv_path = Path(csv_path)
         df = pd.read_csv(csv_path)
 
+        # Drop empty rows
+        df = df.dropna(how="all")
+        if df.empty:
+            logger.warning("GACC CSV %s is empty, skipping", csv_path.name)
+            return pd.DataFrame()
+
         # Flexible column mapping
         col_map = {}
         for col in df.columns:
             cl = col.strip().lower()
-            if cl in ("partner", "country", "partner_country", "partnerDesc"):
+            if cl in ("partner", "country", "partner_country", "partnerdesc"):
                 col_map[col] = "partner"
             elif cl in ("period", "month", "yyyymm", "date"):
                 col_map[col] = "period"
@@ -511,22 +516,31 @@ class ComtradeBulkClient:
                 col_map[col] = "net_weight_kg"
             elif cl in ("flow", "flow_code"):
                 col_map[col] = "flow_code"
+            elif cl in ("hs_code", "hs", "commodity_code"):
+                col_map[col] = "hs_code"
+            elif cl in ("commodity",):
+                col_map[col] = "commodity"
 
         df = df.rename(columns=col_map)
-
-        # Ensure required columns
-        if "partner" not in df.columns or "period" not in df.columns:
-            raise ValueError(
-                f"CSV must have Partner and Period columns. Found: {list(df.columns)}"
-            )
 
         if "value_usd" not in df.columns:
             raise ValueError(f"CSV must have a value column (USD). Found: {list(df.columns)}")
 
+        # If no partner column → aggregate data, set partner to "World"
+        if "partner" not in df.columns:
+            df["partner"] = "World"
+            df["partner_code"] = 0
+
+        # Use hs_code from CSV if present, else from argument
+        if "hs_code" in df.columns:
+            hs_code = str(df["hs_code"].iloc[0])
+            df["hs_code"] = hs_code
+        else:
+            df["hs_code"] = hs_code
+
         # Clean up
         df["reporter_code"] = 156
         df["reporter"] = "China"
-        df["hs_code"] = hs_code
         df["commodity"] = self._hs_label(hs_code)
         df["source"] = "gacc"
 
@@ -542,9 +556,10 @@ class ComtradeBulkClient:
             df["date"] = pd.to_datetime(df["period"])
             df["period"] = df["date"].dt.strftime("%Y%m").astype(int)
 
-        # Map partner names to M49 codes
-        name_to_m49 = {v: k for k, v in M49_COUNTRY_NAMES.items()}
-        df["partner_code"] = df["partner"].map(name_to_m49).fillna(0).astype(int)
+        # Map partner names to M49 codes (if not already set)
+        if "partner_code" not in df.columns:
+            name_to_m49 = {v: k for k, v in M49_COUNTRY_NAMES.items()}
+            df["partner_code"] = df["partner"].map(name_to_m49).fillna(0).astype(int)
 
         # Determine year range for cache filename
         years = df["date"].dt.year
@@ -553,7 +568,8 @@ class ComtradeBulkClient:
         # Save
         gacc_dir = self.cache_dir / "gacc"
         gacc_dir.mkdir(exist_ok=True)
-        cache_name = f"gacc_{hs_code}_{flow_code}_{year_range}"
+        fc = df["flow_code"].iloc[0] if "flow_code" in df.columns else flow_code
+        cache_name = f"gacc_{hs_code}_{fc}_{year_range}"
         out_path = gacc_dir / f"{cache_name}.parquet"
         df.to_parquet(out_path, engine="pyarrow")
         logger.info("GACC ingested %s: %d records → %s", csv_path.name, len(df), out_path)
