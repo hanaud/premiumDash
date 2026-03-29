@@ -69,6 +69,13 @@ _FLOW_OPTIONS = [
     {"label": "Export", "value": "X"},
 ]
 
+_SOURCE_OPTIONS = [
+    {"label": "All Sources", "value": "all"},
+    {"label": "Comtrade", "value": "comtrade"},
+    {"label": "GACC (China Customs)", "value": "gacc"},
+    {"label": "Mirror (partners)", "value": "mirror"},
+]
+
 _AXIS_OPTIONS = [
     {"label": "Reporter", "value": "reporter"},
     {"label": "Partner", "value": "partner"},
@@ -76,6 +83,7 @@ _AXIS_OPTIONS = [
     {"label": "Year", "value": "year"},
     {"label": "Month", "value": "month"},
     {"label": "Flow", "value": "flow"},
+    {"label": "Source", "value": "source"},
 ]
 
 _VALUE_OPTIONS = [
@@ -144,6 +152,7 @@ def build_pivot_tab() -> html.Div:
                     _dropdown_block("Reporter", "pivot-reporter", _COUNTRY_OPTIONS,
                                     [c["value"] for c in _COUNTRY_OPTIONS], multi=True, width="260px"),
                     _dropdown_block("Flow", "pivot-flow", _FLOW_OPTIONS, "MX"),
+                    _dropdown_block("Source", "pivot-source", _SOURCE_OPTIONS, "all", width="180px"),
                     _dropdown_block("From", "pivot-start-year", _YEAR_OPTIONS, 2018, width="90px"),
                     _dropdown_block("To", "pivot-end-year", _YEAR_OPTIONS, 2026, width="90px"),
                 ],
@@ -206,6 +215,7 @@ def build_pivot_content(
     value_col: str,
     agg_func: str,
     force_refresh: bool = False,
+    source: str = "all",
 ) -> list:
     """Build the pivot table + summary chart from cached data."""
     client = _get_client()
@@ -218,11 +228,23 @@ def build_pivot_content(
             countries=reporters or None,
             force_refresh=True,
         )
+        # Also fetch mirror data for China if China is in the reporters
+        if reporters and "156" in reporters:
+            for hs in (commodities or list(HS_CODES.values())):
+                try:
+                    client.fetch_china_mirror(
+                        hs_code=hs, start_year=start_year,
+                        end_year=end_year, force_refresh=True,
+                    )
+                except Exception:
+                    logger.warning("Mirror fetch failed for HS %s", hs)
 
-    # Load cached data
+    # Load cached data — filter by source
+    sources = None if source == "all" else [source]
     df = client.load_all_cached(
         commodities=commodities or None,
         countries=reporters or None,
+        sources=sources,
     )
 
     if df.empty:
@@ -336,6 +358,13 @@ def build_pivot_content(
     cache_info = client.get_available_cache_info()
     total_cache_kb = sum(c["size_kb"] for c in cache_info)
 
+    # Source breakdown
+    source_stats = []
+    if "source" in df.columns:
+        for src, cnt in df["source"].value_counts().items():
+            source_stats.append(f"{src}: {cnt:,}")
+    source_text = " | ".join(source_stats) if source_stats else ""
+
     return [
         # Stats bar
         html.Div(
@@ -344,7 +373,7 @@ def build_pivot_content(
                 html.Span(f"Total records: {total_records:,}"),
                 html.Span(f"Pivot rows: {len(pivot):,}"),
                 html.Span(f"Cache files: {len(cache_info)} ({total_cache_kb:,.0f} KB)"),
-            ],
+            ] + ([html.Span(f"Sources: {source_text}")] if source_text else []),
         ),
         # Pivot table
         html.Div(

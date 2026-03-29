@@ -305,67 +305,297 @@ class ComtradeBulkClient:
         self,
         commodities: list[str] | None = None,
         countries: list[str] | None = None,
+        sources: list[str] | None = None,
     ) -> pd.DataFrame:
-        """Load all cached parquet files matching the given filters."""
+        """
+        Load all cached data from Comtrade, GACC, and mirror parquets.
+
+        Parameters
+        ----------
+        sources : list of {"comtrade", "gacc", "mirror"} or None for all.
+        """
         hs_list = commodities or list(HS_CODES.values())
         country_list = countries or list(REPORTER_COUNTRIES.keys())
+        load_sources = sources or ["comtrade", "gacc", "mirror"]
 
         frames: list[pd.DataFrame] = []
-        for path in sorted(self.cache_dir.glob("comtrade_*.parquet")):
-            # Parse filename — two conventions:
-            #   NEW: comtrade_{hs}_{country}_MX_{start}_{end}.parquet
-            #   OLD: comtrade_{country}_MX_{start}_{end}.parquet  (gold-only)
-            parts = path.stem.split("_")
-            if len(parts) < 4:
-                continue
 
-            # Detect which convention: if parts[1] is a known HS code → new format
-            if parts[1] in HS_CODES.values():
+        # 1. Comtrade direct files
+        if "comtrade" in load_sources:
+            for path in sorted(self.cache_dir.glob("comtrade_*.parquet")):
+                parts = path.stem.split("_")
+                if len(parts) < 4:
+                    continue
+                if parts[1] in HS_CODES.values():
+                    hs, country = parts[1], parts[2]
+                elif parts[1] in REPORTER_COUNTRIES:
+                    hs, country = "7108", parts[1]
+                else:
+                    continue
+                if hs not in hs_list or country not in country_list:
+                    continue
+                try:
+                    df = pd.read_parquet(path)
+                    if "commodity" not in df.columns:
+                        df["commodity"] = self._hs_label(hs)
+                    if "source" not in df.columns:
+                        df["source"] = "comtrade"
+                    frames.append(df)
+                except Exception as exc:
+                    logger.warning("Failed to read %s: %s", path, exc)
+
+        # 2. Mirror files: mirror_{hs}_{reporter}_CN_{start}_{end}.parquet
+        if "mirror" in load_sources:
+            for path in sorted(self.cache_dir.glob("mirror_*.parquet")):
+                parts = path.stem.split("_")
+                if len(parts) < 5:
+                    continue
                 hs = parts[1]
-                country = parts[2]
-            elif parts[1] in REPORTER_COUNTRIES:
-                # Legacy gold-only files
-                hs = "7108"
-                country = parts[1]
-            else:
-                continue
+                if hs not in hs_list:
+                    continue
+                # Mirror data is about China — include if 156 is in country list
+                if "156" not in country_list:
+                    continue
+                try:
+                    df = pd.read_parquet(path)
+                    if "commodity" not in df.columns:
+                        df["commodity"] = self._hs_label(hs)
+                    if "source" not in df.columns:
+                        df["source"] = "mirror"
+                    frames.append(df)
+                except Exception as exc:
+                    logger.warning("Failed to read %s: %s", path, exc)
 
-            if hs not in hs_list or country not in country_list:
-                continue
-
-            try:
-                df = pd.read_parquet(path)
-                # Ensure commodity column
-                if "commodity" not in df.columns:
-                    df["commodity"] = self._hs_label(hs)
-                frames.append(df)
-            except Exception as exc:
-                logger.warning("Failed to read %s: %s", path, exc)
+        # 3. GACC files: data/gold_trade/gacc/*.parquet
+        if "gacc" in load_sources:
+            gacc_dir = self.cache_dir / "gacc"
+            if gacc_dir.exists():
+                for path in sorted(gacc_dir.glob("gacc_*.parquet")):
+                    parts = path.stem.split("_")
+                    if len(parts) >= 3:
+                        hs = parts[1]
+                        if hs not in hs_list:
+                            continue
+                    if "156" not in country_list:
+                        continue
+                    try:
+                        df = pd.read_parquet(path)
+                        if "commodity" not in df.columns:
+                            df["commodity"] = self._hs_label(hs)
+                        if "source" not in df.columns:
+                            df["source"] = "gacc"
+                        frames.append(df)
+                    except Exception as exc:
+                        logger.warning("Failed to read GACC %s: %s", path, exc)
 
         if frames:
             combined = pd.concat(frames, ignore_index=True)
-            # De-duplicate (same record from overlapping cache files)
+            # De-duplicate: comtrade > gacc > mirror priority
             dedup_cols = [c for c in ("period", "reporter_code", "partner_code", "flow_code", "hs_code")
                           if c in combined.columns]
-            if dedup_cols:
+            if dedup_cols and "source" in combined.columns:
+                source_priority = {"comtrade": 0, "gacc": 1, "mirror": 2}
+                combined["_src_rank"] = combined["source"].map(source_priority).fillna(9)
+                combined = combined.sort_values("_src_rank").drop_duplicates(
+                    subset=dedup_cols, keep="first"
+                ).drop(columns="_src_rank")
+            elif dedup_cols:
                 combined = combined.drop_duplicates(subset=dedup_cols)
             return combined
         return pd.DataFrame()
 
+    # ==================================================================
+    #  Mirror data: query partner countries for China trade
+    # ==================================================================
+    MIRROR_REPORTERS = ["757", "036", "344", "826", "710", "842"]  # CH, AU, HK, UK, ZA, US
+
+    def fetch_china_mirror(
+        self,
+        hs_code: str = "7108",
+        start_year: int = 2018,
+        end_year: int | None = None,
+        force_refresh: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Fetch China trade data by querying partner countries as reporters.
+
+        E.g. Switzerland exporting to China → China importing from Switzerland.
+        Flow codes are swapped: reporter's export = China's import.
+        """
+        if end_year is None:
+            end_year = dt.date.today().year
+
+        commodity_name = self._hs_label(hs_code)
+        cache_key = f"mirror_{hs_code}_ALL_CN_{start_year}_{end_year}"
+        if not force_refresh:
+            cached = self._load_cache(cache_key)
+            if cached is not None:
+                return cached
+
+        all_frames: list[pd.DataFrame] = []
+
+        for reporter in self.MIRROR_REPORTERS:
+            country_name = REPORTER_COUNTRIES.get(reporter, reporter)
+            logger.info("Mirror: %s %s → China (%d-%d)", country_name, commodity_name, start_year, end_year)
+
+            # Fetch this reporter's trade data (already cached if fetched before)
+            reporter_cache = f"comtrade_{hs_code}_{reporter}_MX_{start_year}_{end_year}"
+            df = self._load_cache(reporter_cache)
+            if df is None:
+                df = self.fetch_commodity(
+                    hs_code=hs_code,
+                    country_code=reporter,
+                    start_year=start_year,
+                    end_year=end_year,
+                )
+
+            if df.empty:
+                continue
+
+            # Filter for China as partner
+            china = df[df["partner_code"].astype(str).isin(["156", "156.0"])].copy()
+            if china.empty:
+                continue
+
+            # Swap perspective: reporter's export to China = China's import from reporter
+            china["reporter_code"] = 156
+            china["reporter"] = "China"
+            china["partner_code"] = int(reporter)
+            china["partner"] = country_name
+            china["flow_code"] = china["flow_code"].map({"M": "X", "X": "M"}).fillna(china["flow_code"])
+            china["flow"] = china["flow_code"].map(FLOW_CODE_NAMES)
+            china["source"] = "mirror"
+            all_frames.append(china)
+
+        if all_frames:
+            result = pd.concat(all_frames, ignore_index=True)
+            self._save_cache(cache_key, result)
+            logger.info("Mirror %s China: %d records from %d partners", commodity_name, len(result), len(all_frames))
+            return result
+        return pd.DataFrame()
+
+    # ==================================================================
+    #  GACC CSV ingestion
+    # ==================================================================
+    def ingest_gacc_csv(
+        self,
+        csv_path: str | Path,
+        hs_code: str = "7108",
+        flow_code: str = "M",
+    ) -> pd.DataFrame:
+        """
+        Ingest a GACC CSV (from manual browser extraction) into the pipeline.
+
+        Expected CSV columns (flexible matching):
+          - Partner / Country / partner
+          - Period / Month / YYYYMM / period
+          - Value / Trade Value / value_usd (USD)
+          - Weight / Quantity / net_weight_kg (kg, optional)
+
+        Saves as parquet in data/gold_trade/gacc/gacc_{hs}_{flow}_{year_range}.parquet
+        """
+        csv_path = Path(csv_path)
+        df = pd.read_csv(csv_path)
+
+        # Flexible column mapping
+        col_map = {}
+        for col in df.columns:
+            cl = col.strip().lower()
+            if cl in ("partner", "country", "partner_country", "partnerDesc"):
+                col_map[col] = "partner"
+            elif cl in ("period", "month", "yyyymm", "date"):
+                col_map[col] = "period"
+            elif cl in ("value", "trade value", "value_usd", "trade_value", "value (usd)", "primaryvalue"):
+                col_map[col] = "value_usd"
+            elif cl in ("weight", "quantity", "net_weight_kg", "netweight", "net weight"):
+                col_map[col] = "net_weight_kg"
+            elif cl in ("flow", "flow_code"):
+                col_map[col] = "flow_code"
+
+        df = df.rename(columns=col_map)
+
+        # Ensure required columns
+        if "partner" not in df.columns or "period" not in df.columns:
+            raise ValueError(
+                f"CSV must have Partner and Period columns. Found: {list(df.columns)}"
+            )
+
+        if "value_usd" not in df.columns:
+            raise ValueError(f"CSV must have a value column (USD). Found: {list(df.columns)}")
+
+        # Clean up
+        df["reporter_code"] = 156
+        df["reporter"] = "China"
+        df["hs_code"] = hs_code
+        df["commodity"] = self._hs_label(hs_code)
+        df["source"] = "gacc"
+
+        if "flow_code" not in df.columns:
+            df["flow_code"] = flow_code
+        df["flow"] = df["flow_code"].map(FLOW_CODE_NAMES)
+
+        # Parse period → date
+        df["period"] = df["period"].astype(str).str.strip()
+        if df["period"].str.len().max() == 6:
+            df["date"] = pd.to_datetime(df["period"], format="%Y%m")
+        else:
+            df["date"] = pd.to_datetime(df["period"])
+            df["period"] = df["date"].dt.strftime("%Y%m").astype(int)
+
+        # Map partner names to M49 codes
+        name_to_m49 = {v: k for k, v in M49_COUNTRY_NAMES.items()}
+        df["partner_code"] = df["partner"].map(name_to_m49).fillna(0).astype(int)
+
+        # Determine year range for cache filename
+        years = df["date"].dt.year
+        year_range = f"{years.min()}_{years.max()}"
+
+        # Save
+        gacc_dir = self.cache_dir / "gacc"
+        gacc_dir.mkdir(exist_ok=True)
+        cache_name = f"gacc_{hs_code}_{flow_code}_{year_range}"
+        out_path = gacc_dir / f"{cache_name}.parquet"
+        df.to_parquet(out_path, engine="pyarrow")
+        logger.info("GACC ingested %s: %d records → %s", csv_path.name, len(df), out_path)
+        return df
+
     def get_available_cache_info(self) -> list[dict]:
-        """Return summary of cached files for the UI."""
+        """Return summary of cached files for the UI (comtrade + mirror + gacc)."""
         info = []
+        # Comtrade files
         for path in sorted(self.cache_dir.glob("comtrade_*.parquet")):
             parts = path.stem.split("_")
             if len(parts) >= 5:
                 hs = parts[1]
                 country = parts[2]
                 info.append({
-                    "file": path.name,
-                    "hs_code": hs,
-                    "commodity": self._hs_label(hs),
+                    "file": path.name, "source": "comtrade",
+                    "hs_code": hs, "commodity": self._hs_label(hs),
                     "country_code": country,
                     "country": REPORTER_COUNTRIES.get(country, country),
+                    "size_kb": round(path.stat().st_size / 1024, 1),
+                })
+        # Mirror files
+        for path in sorted(self.cache_dir.glob("mirror_*.parquet")):
+            parts = path.stem.split("_")
+            if len(parts) >= 3:
+                hs = parts[1]
+                info.append({
+                    "file": path.name, "source": "mirror",
+                    "hs_code": hs, "commodity": self._hs_label(hs),
+                    "country_code": "156", "country": "China (mirror)",
+                    "size_kb": round(path.stat().st_size / 1024, 1),
+                })
+        # GACC files
+        gacc_dir = self.cache_dir / "gacc"
+        if gacc_dir.exists():
+            for path in sorted(gacc_dir.glob("gacc_*.parquet")):
+                parts = path.stem.split("_")
+                hs = parts[1] if len(parts) >= 2 else "?"
+                info.append({
+                    "file": path.name, "source": "gacc",
+                    "hs_code": hs, "commodity": self._hs_label(hs),
+                    "country_code": "156", "country": "China (GACC)",
                     "size_kb": round(path.stat().st_size / 1024, 1),
                 })
         return info

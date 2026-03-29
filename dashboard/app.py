@@ -417,6 +417,7 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
         Input("pivot-commodity", "value"),
         Input("pivot-reporter", "value"),
         Input("pivot-flow", "value"),
+        Input("pivot-source", "value"),
         Input("pivot-start-year", "value"),
         Input("pivot-end-year", "value"),
         Input("pivot-rows", "value"),
@@ -427,7 +428,7 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
         prevent_initial_call=False,
     )
     def update_pivot_content(
-        commodities, reporters, flow, start_year, end_year,
+        commodities, reporters, flow, source, start_year, end_year,
         row_axis, col_axis, value_col, agg_func, n_clicks,
     ):
         from dash import callback_context as ctx
@@ -453,6 +454,7 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
                 value_col=value_col or "value_usd",
                 agg_func=agg_func or "sum",
                 force_refresh=force,
+                source=source or "all",
             )
         except Exception:
             logger.exception("Failed to build pivot content")
