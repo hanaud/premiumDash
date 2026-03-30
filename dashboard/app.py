@@ -418,8 +418,8 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
         Input("pivot-reporter", "value"),
         Input("pivot-flow", "value"),
         Input("pivot-source", "value"),
-        Input("pivot-start-year", "value"),
-        Input("pivot-end-year", "value"),
+        Input("pivot-date-range", "start_date"),
+        Input("pivot-date-range", "end_date"),
         Input("pivot-rows", "value"),
         Input("pivot-cols", "value"),
         Input("pivot-values", "value"),
@@ -428,7 +428,7 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
         prevent_initial_call=False,
     )
     def update_pivot_content(
-        commodities, reporters, flow, source, start_year, end_year,
+        commodities, reporters, flow, source, start_date, end_date,
         row_axis, col_axis, value_col, agg_func, n_clicks,
     ):
         from dash import callback_context as ctx
@@ -447,8 +447,8 @@ def create_app(proxy_url: str | None = None) -> dash.Dash:
                 commodities=commodities if isinstance(commodities, list) else [commodities],
                 reporters=reporters if isinstance(reporters, list) else [reporters],
                 flow=flow or "MX",
-                start_year=start_year or 2018,
-                end_year=end_year or 2026,
+                start_date=start_date,
+                end_date=end_date,
                 row_axis=row_axis or "reporter",
                 col_axis=col_axis or "commodity",
                 value_col=value_col or "value_usd",

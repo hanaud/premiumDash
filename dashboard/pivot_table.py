@@ -80,6 +80,7 @@ _AXIS_OPTIONS = [
     {"label": "Reporter", "value": "reporter"},
     {"label": "Partner", "value": "partner"},
     {"label": "Commodity", "value": "commodity"},
+    {"label": "Date (YYYY-MM)", "value": "date_label"},
     {"label": "Year", "value": "year"},
     {"label": "Month", "value": "month"},
     {"label": "Flow", "value": "flow"},
@@ -153,8 +154,19 @@ def build_pivot_tab() -> html.Div:
                                     [c["value"] for c in _COUNTRY_OPTIONS], multi=True, width="260px"),
                     _dropdown_block("Flow", "pivot-flow", _FLOW_OPTIONS, "MX"),
                     _dropdown_block("Source", "pivot-source", _SOURCE_OPTIONS, "all", width="180px"),
-                    _dropdown_block("From", "pivot-start-year", _YEAR_OPTIONS, 2018, width="90px"),
-                    _dropdown_block("To", "pivot-end-year", _YEAR_OPTIONS, 2026, width="90px"),
+                    html.Div([
+                        html.Label("Date Range", style=_LABEL_STYLE),
+                        dcc.DatePickerRange(
+                            id="pivot-date-range",
+                            min_date_allowed="2018-01-01",
+                            max_date_allowed="2026-12-31",
+                            start_date="2018-01-01",
+                            end_date="2026-12-31",
+                            display_format="MMM YYYY",
+                            style={"fontSize": "12px"},
+                            className="dash-dropdown-dark",
+                        ),
+                    ]),
                 ],
             ),
 
@@ -208,8 +220,8 @@ def build_pivot_content(
     commodities: list[str],
     reporters: list[str],
     flow: str,
-    start_year: int,
-    end_year: int,
+    start_date: str | None,
+    end_date: str | None,
     row_axis: str,
     col_axis: str,
     value_col: str,
@@ -219,6 +231,10 @@ def build_pivot_content(
 ) -> list:
     """Build the pivot table + summary chart from cached data."""
     client = _get_client()
+
+    # Parse date range → year boundaries for API fetch
+    start_year = pd.Timestamp(start_date).year if start_date else 2018
+    end_year = pd.Timestamp(end_date).year if end_date else 2026
 
     if force_refresh:
         client.fetch_all(
@@ -254,12 +270,11 @@ def build_pivot_content(
         )]
 
     # -- Apply filters --
-    # Date range
+    # Date range (full date precision)
     if "date" in df.columns:
-        df = df[
-            (df["date"] >= pd.Timestamp(start_year, 1, 1))
-            & (df["date"] <= pd.Timestamp(end_year, 12, 31))
-        ]
+        dt_start = pd.Timestamp(start_date) if start_date else pd.Timestamp("2018-01-01")
+        dt_end = pd.Timestamp(end_date) if end_date else pd.Timestamp("2026-12-31")
+        df = df[(df["date"] >= dt_start) & (df["date"] <= dt_end)]
 
     # Flow filter
     if flow != "MX" and "flow_code" in df.columns:
@@ -275,6 +290,7 @@ def build_pivot_content(
     if "date" in df.columns:
         df["year"] = df["date"].dt.year
         df["month"] = df["date"].dt.month
+        df["date_label"] = df["date"].dt.strftime("%Y-%m")
 
     # Computed value
     if value_col == "avg_price":
